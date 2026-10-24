@@ -1,0 +1,230 @@
+@import "tailwindcss";
+
+:root {
+  --color-brand-navy: #182435;
+  --color-brand-navy-hover: #223147;
+  --color-brand-navy-active: #2B425A;
+  --color-brand-gold: #ECB956;
+  --color-brand-gold-soft: #F0D391;
+  --color-app-background: #F5F7F9;
+  --color-surface: #FFFFFF;
+  --color-surface-subtle: #F8FAFB;
+  --color-surface-muted: #F1F4F6;
+  --color-text-primary: #172334;
+  --color-text-secondary: #556275;
+  --color-text-muted: #8A95A2;
+  --color-text-on-dark: #FFFFFF;
+  --color-text-on-dark-muted: #AEB9C8;
+  --color-border: #E5E8EC;
+  --color-border-subtle: #EDF0F3;
+  --color-border-strong: #CFD6DD;
+  --color-sidebar-background: #182435;
+  --color-sidebar-surface: #223147;
+  --color-sidebar-active: #2B425A;
+  --color-sidebar-text: #AEB9C8;
+  --color-sidebar-text-active: #FFFFFF;
+  --color-sidebar-muted: #78889E;
+  --color-action-primary: #1D3045;
+  --color-action-primary-hover: #29435F;
+  --color-action-secondary: #426B8D;
+  --color-blue-background: #E7EFF7;
+  --color-blue-foreground: #3B6A92;
+  --color-green-background: #E7F3EA;
+  --color-green-foreground: #4A7C59;
+  --color-amber-background: #F8EEDB;
+  --color-amber-foreground: #9A712B;
+  --color-violet-background: #EFEBF7;
+  --color-violet-foreground: #69588E;
+  --color-success-background: #E6F2E9;
+  --color-success-foreground: #4F7F5C;
+  --color-warning-background: #F8EDDB;
+  --color-warning-foreground: #926B2B;
+  --color-danger-background: #F8E8E4;
+  --color-danger-foreground: #AB5949;
+  --color-danger-solid: #CF654B;
+  --color-neutral-background: #EDF0F3;
+  --color-neutral-foreground: #697686;
+  --color-focus-ring: rgba(55, 110, 166, 0.24);
+  --color-overlay: rgba(18, 27, 39, 0.48);
+  --shadow-card: 0 9px 22px rgba(33, 47, 63, 0.07);
+  --shadow-popover: 0 18px 45px rgba(27, 36, 51, 0.14);
+  --shadow-modal: 0 28px 70px rgba(11, 19, 29, 0.24);
+
+  --background: var(--color-app-background);
+  --foreground: var(--color-text-primary);
+  --surface: #FFFFFF;
+  --raised: var(--color-surface-muted);
+  --line: var(--color-border);
+  --muted: var(--color-text-secondary);
+  --accent: var(--color-brand-gold);
+  --on-accent: var(--color-brand-navy);
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+.text-on-accent {
+  color: var(--on-accent);
+}
+
+.text-accent {
+  color: var(--color-amber-foreground);
+}
+
+button.bg-accent,
+a.bg-accent {
+  background-color: var(--color-action-primary);
+  border-color: var(--color-action-primary);
+  color: var(--color-text-on-dark);
+}
+
+button.bg-accent:hover,
+a.bg-accent:hover {
+  background-color: var(--color-action-primary-hover);
+  color: var(--color-text-on-dark);
+}
+
+button.bg-foreground {
+  background-color: var(--color-action-primary);
+  color: var(--color-text-on-dark);
+}
+
+button.bg-foreground:hover {
+  background-color: var(--color-action-primary-hover);
+  color: var(--color-text-on-dark);
+}
+
+.focus-visible\:outline-accent:focus-visible {
+  outline-color: var(--color-blue-foreground);
+}
+
+.focus-visible\:border-accent:focus-visible {
+  border-color: var(--color-blue-foreground);
+}
+
+.text-emerald-300 {
+  color: var(--color-green-foreground);
+}
+
+.bg-emerald-400 {
+  background-color: var(--color-green-foreground);
+}
+
+.bg-emerald-500\/10 {
+  background-color: var(--color-green-background);
+}
+
+.border-emerald-500\/30 {
+  border-color: color-mix(in srgb, var(--color-green-foreground) 35%, transparent);
+}
+
+main [class*="text-[10px]"].text-muted,
+main [class*="text-[11px]"].text-muted {
+  color: var(--color-text-muted);
+}
+
+aside.bg-surface {
+  background-color: var(--color-sidebar-background);
+  border-color: var(--color-sidebar-active);
+  color: var(--color-sidebar-text);
+}
+
+aside.bg-surface .text-foreground {
+  color: var(--color-text-on-dark);
+}
+
+aside.bg-surface .text-muted {
+  color: var(--color-sidebar-text);
+}
+
+aside.bg-surface .uppercase.text-muted {
+  color: var(--color-sidebar-muted);
+}
+
+aside.bg-surface .bg-background {
+  background-color: var(--color-sidebar-surface);
+  border-color: var(--color-sidebar-active);
+}
+
+aside.bg-surface a:hover {
+  background-color: var(--color-sidebar-surface);
+  color: var(--color-text-on-dark);
+}
+
+aside.bg-surface a.bg-accent,
+aside.bg-surface a.bg-accent:hover {
+  background-color: var(--color-sidebar-active);
+  color: var(--color-sidebar-text-active);
+}
+
+[class~="md:hidden"][class~="bg-surface"][class~="border-b"] {
+  background-color: var(--color-sidebar-background);
+  border-color: var(--color-sidebar-active);
+  color: var(--color-sidebar-text);
+}
+
+[class~="md:hidden"][class~="bg-surface"][class~="border-b"] .text-foreground {
+  color: var(--color-text-on-dark);
+}
+
+[class~="md:hidden"][class~="bg-surface"][class~="border-b"] .text-muted {
+  color: var(--color-sidebar-text);
+}
+
+[class~="md:hidden"][class~="bg-surface"][class~="border-b"] .uppercase.text-muted {
+  color: var(--color-sidebar-muted);
+}
+
+[class~="md:hidden"][class~="bg-surface"][class~="border-b"] .bg-raised {
+  background-color: var(--color-sidebar-surface);
+  border-color: var(--color-sidebar-active);
+  color: var(--color-text-on-dark);
+}
+
+[class~="md:hidden"][class~="bg-surface"][class~="border-b"] a:hover {
+  background-color: var(--color-sidebar-surface);
+  color: var(--color-text-on-dark);
+}
+
+[class~="md:hidden"][class~="bg-surface"][class~="border-b"] a.bg-accent,
+[class~="md:hidden"][class~="bg-surface"][class~="border-b"] a.bg-accent:hover {
+  background-color: var(--color-sidebar-active);
+  color: var(--color-sidebar-text-active);
+}
+
+header:has(.bg-gradient-to-r) .text-foreground {
+  color: var(--color-text-on-dark);
+}
+
+header:has(.bg-gradient-to-r) [class*="text-foreground/"] {
+  color: var(--color-text-on-dark-muted);
+}
+
+header:has(.bg-gradient-to-r) .text-accent {
+  color: var(--color-brand-gold);
+}
+
+section:has(.bg-black\/60) .text-foreground {
+  color: var(--color-text-on-dark);
+}
+
+section:has(.bg-black\/60) [class*="text-foreground/"] {
+  color: var(--color-text-on-dark-muted);
+}
