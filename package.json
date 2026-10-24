@@ -1,0 +1,17 @@
+{
+  "name": "wolf-command-v3",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter wolf dev",
+    "build": "pnpm --filter wolf build",
+    "lint": "pnpm --filter wolf lint",
+    "typecheck": "pnpm --filter wolf typecheck && pnpm --filter @wolf/shared typecheck",
+    "test": "pnpm --filter @wolf/shared test && pnpm --filter wolf test",
+    "db:migrate": "pnpm --filter wolf db:migrate",
+    "db:seed:dev": "pnpm --filter wolf db:seed:dev",
+    "db:seed:organization": "pnpm --filter wolf db:seed:organization",
+    "db:provision": "pnpm --filter wolf db:provision",
+    "db:bootstrap-operator": "pnpm --filter wolf db:bootstrap-operator"
+  }
+}

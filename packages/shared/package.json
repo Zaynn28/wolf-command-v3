@@ -1,0 +1,13 @@
+{
+  "name": "@wolf/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test src/authorization.test.ts",
+    "typecheck": "node ../../apps/wolf/node_modules/typescript/bin/tsc --noEmit -p tsconfig.json"
+  }
+}
