@@ -27,8 +27,8 @@ test("company modules stay isolated and a finance user cannot change them", asyn
     await db.insert(platformOperators).values({ userId: operatorUser.id, createdAt: now });
     const operator = actor(operatorUser.id, "unused", "administrator");
     assert.equal((await createCompany(db, operator, { companyId: "amg", name: "AMG", currencyCode: "IDR", minorScale: 0, workspaceKind: "amg" }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
 
     const amg = await readFinanceModules(db, "amg");
     const bzg = await readFinanceModules(db, "bzg");
@@ -76,7 +76,7 @@ test("a disabled Accounting Core cannot be written through the draft service", a
     const operatorUser = await user(db, "operator@wolf-command.test");
     await db.insert(platformOperators).values({ userId: operatorUser.id, createdAt: now });
     const operator = actor(operatorUser.id, "unused", "administrator");
-    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
     await db.update(financeModules).set({ enabled: "N" }).where(and(eq(financeModules.companyId, "bzg"), eq(financeModules.moduleId, "accounting-core")));
     const staff = actor(operatorUser.id, "bzg", "administrator");
     const saved = await saveDraftJournal(db, staff, {

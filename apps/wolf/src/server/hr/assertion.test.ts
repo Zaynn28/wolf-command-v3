@@ -86,7 +86,19 @@ test("the embedded session returns no employee records", () => {
 test("employee API paths stay on the company allowlist and browser identity headers are not forwarded", () => {
   assert.equal(classifyHrProxyPath("/api/employees"), "api");
   assert.equal(classifyHrProxyPath("/api/employees/emp-1"), "api");
+  assert.equal(classifyHrProxyPath("/api/employees/emp-1/photo"), "api");
+  assert.equal(classifyHrProxyPath("/api/self/profile"), "api");
+  assert.equal(classifyHrProxyPath("/api/profile-change-requests"), "api");
+  assert.equal(classifyHrProxyPath("/api/profile-change-requests/emp-1/approve"), "api");
+  assert.equal(classifyHrProxyPath("/api/profile-change-requests/emp-1/reject"), "api");
+  assert.equal(classifyHrProxyPath("/api/payroll-periods/period-1/calculate"), "blocked");
+  assert.equal(classifyHrProxyPath("/api/staff-tasks"), "api");
+  assert.equal(classifyHrProxyPath("/api/staff-tasks/11111111-1111-1111-1111-111111111111"), "api");
+  assert.equal(classifyHrProxyPath("/api/imports"), "api");
+  assert.equal(classifyHrProxyPath("/api/imports/assets"), "api");
   assert.equal(classifyHrProxyPath("/api/payroll-records/period-1"), "api");
+  assert.equal(classifyHrProxyPath("/api/payroll-structure"), "api");
+  assert.equal(classifyHrProxyPath("/api/payroll-structure"), "api");
   assert.equal(classifyHrProxyPath("/api/admin/mock-data"), "blocked");
   assert.equal(classifyHrProxyPath("/api"), "blocked");
   assert.equal(classifyHrProxyPath("/__wolf/session"), "session");

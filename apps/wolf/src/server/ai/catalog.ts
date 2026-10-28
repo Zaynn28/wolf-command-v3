@@ -69,7 +69,7 @@ const denialSchema: ArgSchema = {
 export const assistantToolCatalog: readonly CatalogTool[] = [
   {
     name: "organization.search_people",
-    description: "Search demo organization people in the conversation company. Results are limited to people this account can already read.",
+    description: "Search HR employees in the conversation company. Results are limited to that company's HR directory.",
     permission: "ai.read.organization",
     scope: "company",
     readOnly: true,
@@ -208,8 +208,9 @@ async function searchPeople(db: AuthDatabase, actor: Actor, companyId: string, q
           .map((position) => ({
             id: position.person?.id,
             displayName: position.person?.displayName,
+            employeeCode: position.person?.employeeCode ?? null,
             employmentStatus: position.person?.employmentStatus,
-            isDemo: true as const,
+            isDemo: false as const,
             companyId,
             departmentName: department.name,
             positionTitle: position.title,
@@ -220,7 +221,7 @@ async function searchPeople(db: AuthDatabase, actor: Actor, companyId: string, q
   return {
     state: "ok",
     note: `${rows.length} organization people in this company.`,
-    data: { demo: true, companyId, truncated: people.length > rows.length, people: rows },
+    data: { companyId, truncated: people.length > rows.length, people: rows },
   };
 }
 
@@ -255,7 +256,7 @@ async function readTasks(db: AuthDatabase, actor: Actor, companyId: string, now:
         return {
           id: person.id,
           displayName: person.displayName,
-          isDemo: true as const,
+          isDemo: person.isDemo,
           companyId,
           counts: countTasks(personTasks.map((task) => ({ status: task.status, overdue: task.overdue }))),
         };

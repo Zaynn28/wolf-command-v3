@@ -9,6 +9,8 @@ import { listFinanceCompanies } from "../finance/companies";
 
 test("operator bootstrap refuses production and missing opt-in", () => {
   assert.equal(bootstrapAllowed({ NODE_ENV: "production", WOLF_ALLOW_DEV_BOOTSTRAP: "1" }).ok, false);
+  assert.equal(bootstrapAllowed({ NODE_ENV: "production", WOLF_ALLOW_PRODUCTION_BOOTSTRAP: "1" }).ok, true);
+  assert.equal(bootstrapAllowed({ NODE_ENV: "development", WOLF_ALLOW_PRODUCTION_BOOTSTRAP: "1" }).ok, false);
   assert.equal(bootstrapAllowed({ NODE_ENV: "development" }).ok, false);
   assert.equal(bootstrapAllowed({ NODE_ENV: "development", WOLF_ALLOW_DEV_BOOTSTRAP: "1" }).ok, true);
 });
@@ -21,9 +23,10 @@ test("the AMG operating system cannot be attached to another company, and financ
     if (!operatorUser || !staffUser) throw new Error("missing user");
     await db.insert(platformOperators).values({ userId: operatorUser.id, createdAt: now });
     const operator: Actor = { userId: operatorUser.id, memberships: [], grants: [] };
-    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "USD", minorScale: 2, workspaceKind: "amg" }, now)).status, "invalid");
+    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "IDR", minorScale: 0, workspaceKind: "amg" }, now)).status, "invalid");
     assert.equal((await createCompany(db, operator, { companyId: "amg", name: "AMG", currencyCode: "IDR", minorScale: 0, workspaceKind: "amg", memberEmail: "staff@wolf-command.test", memberRole: "staff" }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "USD", minorScale: 2, workspaceKind: "shared" }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "IDR", minorScale: 0, workspaceKind: "shared" }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "usd-co", name: "USD", currencyCode: "USD", minorScale: 2 }, now)).status, "invalid");
     const staff: Actor = { userId: staffUser.id, memberships: [{ companyId: "amg", departmentId: "finance", role: "staff" }], grants: [] };
     const visible = await listFinanceCompanies(db, staff);
     assert.deepEqual(visible.map((company) => company.companyId), ["amg"]);

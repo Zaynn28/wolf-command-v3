@@ -9,6 +9,7 @@ import {
   reassignOrganizationTask,
   transitionOrganizationTask,
 } from "./service";
+import { offlineHrDirectory, type HrDirectorySource } from "./hr-directory";
 
 export type OrganizationRequest =
   | { kind: "tree"; companyId: string | null; query: string }
@@ -24,14 +25,15 @@ export async function serveOrganization(
   token: string | null,
   now: Date,
   request: OrganizationRequest,
+  source: HrDirectorySource = offlineHrDirectory,
 ): Promise<{ status: number; body: unknown }> {
   const opened = await openOrganizationActor(db, token, now);
   if (opened.status !== 200) return { status: opened.status, body: { error: opened.error } };
-  if (request.kind === "tree") return readOrganizationTree(db, opened.actor, request.companyId, request.query);
-  if (request.kind === "person") return readOrganizationPerson(db, opened.actor, request.personId);
-  if (request.kind === "tasks") return readTaskOverview(db, opened.actor, request);
+  if (request.kind === "tree") return readOrganizationTree(db, opened.actor, request.companyId, request.query, source);
+  if (request.kind === "person") return readOrganizationPerson(db, opened.actor, request.personId, source);
+  if (request.kind === "tasks") return readTaskOverview(db, opened.actor, request, source);
   if (request.kind === "progress") {
-    return readStaffProgress(db, opened.actor, { companyId: request.companyId, today: request.today });
+    return readStaffProgress(db, opened.actor, { companyId: request.companyId, today: request.today }, source);
   }
   if (request.kind === "create") {
     return createOrganizationTask(db, opened.actor, opened.email, now, {
@@ -45,7 +47,7 @@ export async function serveOrganization(
       reviewRequired: request.body.reviewRequired === true,
       assigneePersonId: optionalText(request.body.assigneePersonId),
       teamDepartmentId: optionalText(request.body.teamDepartmentId),
-    });
+    }, source);
   }
   if (request.kind === "transition") {
     return transitionOrganizationTask(
@@ -57,6 +59,7 @@ export async function serveOrganization(
       text(request.body.action),
       text(request.body.note),
       optionalText(request.body.evidenceUrl),
+      source,
     );
   }
   return reassignOrganizationTask(
@@ -68,6 +71,7 @@ export async function serveOrganization(
     optionalText(request.body.assigneePersonId),
     optionalText(request.body.teamDepartmentId),
     text(request.body.note),
+    source,
   );
 }
 

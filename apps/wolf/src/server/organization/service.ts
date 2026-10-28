@@ -1,16 +1,20 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Actor } from "@wolf/shared";
 import { authorize } from "@wolf/shared";
+import { filterCompaniesByOperatingGrant, organizationTaskGrant, readOperatingGrantEffect } from "../access/operating-grants";
 import { evaluateModuleAccess } from "../access/matrix";
 import { fingerprintEmail } from "../auth/crypto";
 import { writeAudit } from "../auth/audit";
 import { loadTrustedActor } from "../access/actor";
 import { readSession } from "../auth/session";
-import { companies, departments, orgAssignments, orgPeople, orgPositions, orgTaskEvents, orgTasks } from "../db/schema";
+import { visibleOperatorCompanyId } from "../companies/operator-list";
+import { companies, departments, orgPeople, orgTaskEvents, orgTasks } from "../db/schema";
 import type { AuthDatabase } from "../db/types";
+import { isHrCompany, offlineHrDirectory, type HrDirectorySource, type HrEmployeeLink, readSyncedHrLinks, resolveHrDirectories, syncHrLinks } from "./hr-directory";
+import { createHttpHrStaffTaskClient, pushOrganizationTask, reconcileCompanyStaffTasks, staffTaskSyncAllowed } from "./hr-task-sync";
 import { reasonRequired, taskActions, transitionTask, type TaskAction, type TaskStatus } from "./transitions";
 
-const personFields = ["id", "displayName", "employmentStatus", "isDemo", "companies"] as const;
+const personFields = ["id", "displayName", "employeeCode", "employmentStatus", "isDemo", "companies"] as const;
 
 export type OrgCompany = { id: string; name: string };
 
@@ -28,8 +32,9 @@ export type OrgPlacement = {
 export type OrgPerson = {
   id: string;
   displayName: string;
+  employeeCode: string | null;
   employmentStatus: string;
-  isDemo: true;
+  isDemo: boolean;
   companies: OrgPlacement[];
 };
 
@@ -37,6 +42,7 @@ export type OrgTree = {
   companies: Array<{
     id: string;
     name: string;
+    directory: "ready" | "unavailable";
     departments: Array<{
       id: string;
       name: string;
@@ -109,8 +115,9 @@ export type StaffProgressTask = {
 export type StaffProgressPerson = {
   id: string;
   displayName: string;
+  employeeCode: string | null;
   employmentStatus: string;
-  isDemo: true;
+  isDemo: boolean;
   companies: OrgPlacement[];
   counts: StaffTaskCounts;
   tasks: StaffProgressTask[];
@@ -120,6 +127,7 @@ export type StaffProgress = {
   scope: "owner" | "company";
   ownerView: boolean;
   companies: OrgCompany[];
+  unavailableCompanyIds: string[];
   people: StaffProgressPerson[];
   unassigned: {
     title: "Unassigned team tasks";
@@ -176,8 +184,14 @@ export async function readOrganizationTree(
   actor: Actor,
   companyId: string | null,
   query: string,
-): Promise<OrgResult<{ companies: OrgCompany[]; tree: OrgTree; demo: true }>> {
-  const companiesAllowed = authorizedCompanyIds(actor).filter((id) => companyAllowed(actor, id));
+  source: HrDirectorySource = { mode: "api" },
+): Promise<OrgResult<{ companies: OrgCompany[]; tree: OrgTree }>> {
+  const companiesAllowed = await filterCompaniesByOperatingGrant(
+    db,
+    actor,
+    authorizedCompanyIds(actor).filter((id) => companyAllowed(actor, id)),
+    "organization.board",
+  );
   if (companyId && !companiesAllowed.includes(companyId)) {
     return { status: 403, body: { error: "Organization is not available for this company." } };
   }
@@ -185,14 +199,14 @@ export async function readOrganizationTree(
     return { status: 403, body: { error: "Organization is not available for this account." } };
   }
   const selected = companyId ? [companyId] : companiesAllowed;
-  const tree = await loadTree(db, selected, query);
+  const roster = await loadHrRoster(db, actor.userId, selected, source, actor);
+  const tree = await loadTree(db, selected, query, roster.people, roster.unavailable);
   const companyRows = selected.length
     ? await db.select({ id: companies.id, name: companies.name }).from(companies).where(inArray(companies.id, selected))
     : [];
   return {
     status: 200,
     body: {
-      demo: true,
       companies: companyRows.map((row) => ({ id: row.id, name: row.name })),
       tree,
     },
@@ -203,8 +217,15 @@ export async function readOrganizationPerson(
   db: AuthDatabase,
   actor: Actor,
   personId: string,
+  source: HrDirectorySource = { mode: "api" },
 ): Promise<OrgResult<{ person: OrgPerson; tasks: Array<Pick<TaskView, "id" | "title" | "status" | "companyId" | "isDemo">> }>> {
-  const people = await loadPeople(db, authorizedCompanyIds(actor).filter((id) => companyAllowed(actor, id)));
+  const allowed = await filterCompaniesByOperatingGrant(
+    db,
+    actor,
+    authorizedCompanyIds(actor).filter((id) => companyAllowed(actor, id)),
+    "organization.board",
+  );
+  const people = (await loadHrRoster(db, actor.userId, allowed, source, actor)).people;
   const person = people.find((item) => item.id === personId);
   if (!person) return { status: 403, body: { error: "That person is not available for this session." } };
   assertPersonShape(person);
@@ -219,6 +240,7 @@ export async function readTaskOverview(
   db: AuthDatabase,
   actor: Actor,
   input: { companyId: string | null; from: string; to: string; today: string; scope: "owner" | "company" | "assigned" },
+  source: HrDirectorySource = offlineHrDirectory,
 ): Promise<OrgResult<TaskOverview & { companies: OrgCompany[] }>> {
   if (input.scope === "owner") {
     const owned = authorizedCompanyIds(actor).filter((id) => hasOwnerView(actor, id));
@@ -237,6 +259,7 @@ export async function readTaskOverview(
   if (companyIds.length === 0) {
     return { status: 403, body: { error: "Organization is not available for this account." } };
   }
+  await loadHrRoster(db, actor.userId, companyIds, source, actor);
   const tasks = await visibleTasks(db, actor, companyIds, input.scope);
   const overview = summarize(tasks, input.from, input.to, input.today, input.scope);
   const companyRows = companyIds.length
@@ -246,7 +269,12 @@ export async function readTaskOverview(
 }
 
 export async function listReadableCompanies(db: AuthDatabase, actor: Actor): Promise<OrgCompany[]> {
-  const ids = authorizedCompanyIds(actor).filter((id) => companyAllowed(actor, id));
+  const ids = await filterCompaniesByOperatingGrant(
+    db,
+    actor,
+    authorizedCompanyIds(actor).filter((id) => visibleOperatorCompanyId(id) && companyAllowed(actor, id)),
+    "organization.board",
+  );
   if (ids.length === 0) return [];
   const rows = await db.select({ id: companies.id, name: companies.name }).from(companies).where(inArray(companies.id, ids));
   return rows.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
@@ -256,11 +284,17 @@ export async function readStaffProgress(
   db: AuthDatabase,
   actor: Actor,
   input: { companyId: string | null; today: string },
+  source: HrDirectorySource = { mode: "api" },
 ): Promise<OrgResult<StaffProgress>> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.today)) {
     return { status: 400, body: { error: "The progress date is not valid." } };
   }
-  const readable = authorizedCompanyIds(actor).filter((id) => companyAllowed(actor, id));
+  const readable = await filterCompaniesByOperatingGrant(
+    db,
+    actor,
+    authorizedCompanyIds(actor).filter((id) => companyAllowed(actor, id)),
+    "organization.board",
+  );
   const allowed = readable.filter((id) => isAdministrator(actor, id) || hasOwnerView(actor, id));
   if (input.companyId && !readable.includes(input.companyId)) {
     return { status: 403, body: { error: "Organization is not available for this company." } };
@@ -273,8 +307,9 @@ export async function readStaffProgress(
   }
   const companyIds = input.companyId ? [input.companyId] : allowed;
   const ownerView = companyIds.length > 0 && companyIds.every((id) => hasOwnerView(actor, id));
+  const roster = await loadHrRoster(db, actor.userId, companyIds, source, actor);
   const tasks = await visibleTasks(db, actor, companyIds, ownerView ? "owner" : "company");
-  const people = await loadPeople(db, companyIds);
+  const people = roster.people;
   const companyRows = companyIds.length
     ? await db.select({ id: companies.id, name: companies.name }).from(companies).where(inArray(companies.id, companyIds))
     : [];
@@ -302,8 +337,9 @@ export async function readStaffProgress(
       return {
         id: person.id,
         displayName: person.displayName,
+        employeeCode: person.employeeCode,
         employmentStatus: person.employmentStatus,
-        isDemo: true as const,
+        isDemo: person.isDemo,
         companies: person.companies,
         counts: countProgressTasks(personTasks),
         tasks: personTasks,
@@ -317,6 +353,7 @@ export async function readStaffProgress(
       scope: ownerView ? "owner" : "company",
       ownerView,
       companies: companyRows.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id)),
+      unavailableCompanyIds: [...roster.unavailable].sort(),
       people: progressPeople,
       unassigned: {
         title: "Unassigned team tasks",
@@ -344,8 +381,11 @@ export async function createOrganizationTask(
     assigneePersonId: string | null;
     teamDepartmentId: string | null;
   },
+  source: HrDirectorySource = { mode: "api" },
 ): Promise<OrgResult<{ taskId: string }>> {
-  if (!isAdministrator(actor, input.companyId)) {
+  const createGrant = await readOperatingGrantEffect(db, actor.userId, input.companyId, "organization.task.create");
+  if (createGrant === "deny") return { status: 403, body: { error: "That action is not granted for this operating role." } };
+  if (createGrant !== "allow" && !isAdministrator(actor, input.companyId)) {
     return { status: 403, body: { error: "Task creation requires a company administrator membership." } };
   }
   if (!input.assigneePersonId && !input.teamDepartmentId) {
@@ -361,9 +401,9 @@ export async function createOrganizationTask(
     return { status: 400, body: { error: "The task fields are not valid." } };
   }
   if (input.assigneePersonId) {
-    const people = await loadPeople(db, [input.companyId]);
-    if (!people.some((person) => person.id === input.assigneePersonId)) {
-      return { status: 403, body: { error: "That person is not available for this company." } };
+    const people = (await loadHrRoster(db, actor.userId, [input.companyId], source, actor)).people;
+    if (!people.some((person) => person.id === input.assigneePersonId && person.isDemo === false)) {
+      return { status: 403, body: { error: "That person is not an HR employee of this company." } };
     }
   }
   const id = `demo-task-${now.getTime().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
@@ -385,6 +425,7 @@ export async function createOrganizationTask(
     updatedAt: now,
   });
   await recordEvent(db, actor, email, now, id, input.companyId, null, "ASSIGNED", "Task assigned.");
+  await pushLinkedStaffTask(db, actor, source, id);
   return { status: 201, body: { taskId: id } };
 }
 
@@ -397,6 +438,7 @@ export async function transitionOrganizationTask(
   action: string,
   note: string,
   evidenceUrl: string | null,
+  source: HrDirectorySource = offlineHrDirectory,
 ): Promise<OrgResult<{ status: TaskStatus }>> {
   if (!taskActions.includes(action as TaskAction)) return { status: 400, body: { error: "That task action is not valid." } };
   const taskAction = action as TaskAction;
@@ -414,8 +456,11 @@ export async function transitionOrganizationTask(
   const reviewerAction = taskAction === "approve" || taskAction === "return";
   const assignee = await isAssignee(db, actor, task);
   const reviewer = canApprove(actor, task.companyId) && task.submittedByUserId !== actor.userId;
-  if (reviewerAction && !reviewer) return { status: 403, body: { error: "Review requires an approval grant for this company." } };
-  if (!reviewerAction && !assignee && !isAdministrator(actor, task.companyId)) {
+  const taskGrant = organizationTaskGrant(taskAction);
+  const taskEffect = taskGrant ? await readOperatingGrantEffect(db, actor.userId, task.companyId, taskGrant) : "unchanged";
+  if (taskEffect === "deny") return { status: 403, body: { error: "That action is not granted for this operating role." } };
+  if (taskEffect !== "allow" && reviewerAction && !reviewer) return { status: 403, body: { error: "Review requires an approval grant for this company." } };
+  if (taskEffect !== "allow" && !reviewerAction && !assignee && !isAdministrator(actor, task.companyId)) {
     return { status: 403, body: { error: "This account cannot update that task." } };
   }
   const moved = transitionTask(
@@ -435,6 +480,7 @@ export async function transitionOrganizationTask(
     })
     .where(eq(orgTasks.id, task.id));
   await recordEvent(db, actor, email, now, task.id, task.companyId, task.status, moved.status, note.trim() || taskAction);
+  await pushLinkedStaffTask(db, actor, source, task.id);
   return { status: 200, body: { status: moved.status } };
 }
 
@@ -447,27 +493,45 @@ export async function reassignOrganizationTask(
   assigneePersonId: string | null,
   teamDepartmentId: string | null,
   note: string,
-): Promise<OrgResult<{ status: "ASSIGNED" }>> {
+  source: HrDirectorySource = { mode: "api" },
+): Promise<OrgResult<{ status: TaskStatus }>> {
   const rows = await db.select().from(orgTasks).where(eq(orgTasks.id, taskId)).limit(1);
   const task = rows[0];
-  if (!task || !isAdministrator(actor, task.companyId)) {
+  if (!task) return { status: 403, body: { error: "Reassignment requires a company administrator membership." } };
+  const assignGrant = await readOperatingGrantEffect(db, actor.userId, task.companyId, "organization.task.assign");
+  if (assignGrant === "deny") return { status: 403, body: { error: "That action is not granted for this operating role." } };
+  if (assignGrant !== "allow" && !isAdministrator(actor, task.companyId)) {
     return { status: 403, body: { error: "Reassignment requires a company administrator membership." } };
   }
   if (task.status === "COMPLETED" || (!assigneePersonId && !teamDepartmentId)) {
     return { status: 400, body: { error: "That reassignment is not valid." } };
   }
+  if (assigneePersonId) {
+    const people = (await loadHrRoster(db, actor.userId, [task.companyId], source, actor)).people;
+    if (!people.some((person) => person.id === assigneePersonId && person.companies.some((company) => company.companyId === task.companyId))) {
+      return { status: 403, body: { error: "That person is not an HR employee of this company." } };
+    }
+  }
+  if (teamDepartmentId) {
+    const team = await db
+      .select({ id: departments.id })
+      .from(departments)
+      .where(and(eq(departments.companyId, task.companyId), eq(departments.id, teamDepartmentId)))
+      .limit(1);
+    if (!team[0]) return { status: 403, body: { error: "That team is not available for this company." } };
+  }
+  const status = task.status as TaskStatus;
   await db
     .update(orgTasks)
     .set({
       assigneePersonId,
       teamDepartmentId,
-      status: "ASSIGNED",
-      submittedByUserId: null,
       updatedAt: now,
     })
     .where(eq(orgTasks.id, task.id));
-  await recordEvent(db, actor, email, now, task.id, task.companyId, task.status, "ASSIGNED", note.trim() || "Reassigned.");
-  return { status: 200, body: { status: "ASSIGNED" } };
+  await recordEvent(db, actor, email, now, task.id, task.companyId, status, status, note.trim() || "Reassigned.");
+  await pushLinkedStaffTask(db, actor, source, task.id);
+  return { status: 200, body: { status } };
 }
 
 async function isAssignee(db: AuthDatabase, actor: Actor, task: typeof orgTasks.$inferSelect): Promise<boolean> {
@@ -486,7 +550,7 @@ async function visibleTasks(
 ): Promise<TaskView[]> {
   if (companyIds.length === 0) return [];
   const rows = await db.select().from(orgTasks).where(inArray(orgTasks.companyId, companyIds)).orderBy(asc(orgTasks.dueOn));
-  const people = await loadPeople(db, companyIds);
+  const names = await assigneeNames(db, rows.flatMap((row) => (row.assigneePersonId ? [row.assigneePersonId] : [])));
   const events = rows.length
     ? await db.select().from(orgTaskEvents).where(inArray(orgTaskEvents.taskId, rows.map((row) => row.id))).orderBy(asc(orgTaskEvents.createdAt))
     : [];
@@ -512,7 +576,7 @@ async function visibleTasks(
       reviewRequired: row.reviewRequired,
       status: row.status as TaskStatus,
       assigneePersonId: row.assigneePersonId,
-      assigneeName: people.find((person) => person.id === row.assigneePersonId)?.displayName ?? null,
+      assigneeName: row.assigneePersonId ? names.get(row.assigneePersonId) ?? null : null,
       teamDepartmentId: row.teamDepartmentId,
       evidenceUrl: row.evidenceUrl,
       isDemo: true,
@@ -630,91 +694,151 @@ function group<T>(rows: T[], key: (row: T) => string): Array<[string, T[]]> {
   return [...map.entries()];
 }
 
-async function loadTree(db: AuthDatabase, companyIds: string[], query: string): Promise<OrgTree> {
-  const people = await loadPeople(db, companyIds);
+async function syncLinkedStaffTasks(
+  db: AuthDatabase,
+  actor: Actor,
+  now: Date,
+  companyId: string,
+  employees: readonly HrEmployeeLink[],
+  source: HrDirectorySource,
+): Promise<void> {
+  if (source.mode !== "api" || !staffTaskSyncAllowed() || !isHrCompany(companyId)) return;
+  await reconcileCompanyStaffTasks(db, actor, now, companyId, employees, createHttpHrStaffTaskClient(actor.userId));
+}
+
+async function pushLinkedStaffTask(db: AuthDatabase, actor: Actor, source: HrDirectorySource, taskId: string): Promise<void> {
+  if (source.mode !== "api" || !staffTaskSyncAllowed()) return;
+  try {
+    await pushOrganizationTask(db, createHttpHrStaffTaskClient(actor.userId), taskId);
+  } catch {
+    // The next organization read retries the same external id.
+  }
+}
+
+async function loadHrRoster(
+  db: AuthDatabase,
+  userId: string,
+  companyIds: string[],
+  source: HrDirectorySource,
+  actor: Actor | null = null,
+): Promise<{ people: OrgPerson[]; unavailable: Set<string> }> {
+  const { directories, unavailable } = await resolveHrDirectories(userId, companyIds, source);
+  const now = new Date();
+  for (const [companyId, employees] of directories) {
+    if (unavailable.has(companyId)) continue;
+    await syncHrLinks(db, companyId, employees);
+    if (!actor) continue;
+    try {
+      await syncLinkedStaffTasks(db, actor, now, companyId, employees, source);
+    } catch {
+      // Keep organization available when one company cannot sync.
+    }
+  }
+  return { people: await assembleHrPeople(db, companyIds, directories), unavailable };
+}
+
+async function assembleHrPeople(
+  db: AuthDatabase,
+  companyIds: string[],
+  directories: Map<string, HrEmployeeLink[]>,
+): Promise<OrgPerson[]> {
+  if (companyIds.length === 0) return [];
+  const companyRows = await db.select({ id: companies.id, name: companies.name }).from(companies).where(inArray(companies.id, companyIds));
+  const companyNames = new Map(companyRows.map((company) => [company.id, company.name]));
+  const people: OrgPerson[] = [];
+  for (const companyId of companyIds) {
+    const employees = directories.get(companyId) ?? [];
+    const rows = await readSyncedHrLinks(db, companyId, employees);
+    const byCode = new Map(rows.map((row) => [row.employeeCode, row]));
+    for (const employee of employees) {
+      const row = byCode.get(employee.employeeCode);
+      if (!row || row.companyId !== companyId || row.isDemo || row.source !== "hr") continue;
+      const card: OrgPerson = {
+        id: row.id,
+        displayName: row.displayName,
+        employeeCode: row.employeeCode,
+        employmentStatus: row.employmentStatus,
+        isDemo: false,
+        companies: [
+          {
+            companyId,
+            companyName: companyNames.get(companyId) ?? companyId,
+            departmentId: "",
+            departmentName: row.departmentName ?? "No department",
+            positionId: row.id,
+            positionTitle: row.positionTitle ?? "",
+            managerPersonId: null,
+            managerName: null,
+          },
+        ],
+      };
+      assertPersonShape(card);
+      people.push(card);
+    }
+  }
+  return people;
+}
+
+async function loadTree(
+  db: AuthDatabase,
+  companyIds: string[],
+  query: string,
+  people: OrgPerson[],
+  unavailable: Set<string>,
+): Promise<OrgTree> {
   const needle = query.trim().toLowerCase();
-  const departmentRows = companyIds.length
-    ? await db.select().from(departments).where(and(inArray(departments.companyId, companyIds), eq(departments.isDemo, true)))
-    : [];
-  const positionRows = companyIds.length
-    ? await db.select().from(orgPositions).where(inArray(orgPositions.companyId, companyIds))
-    : [];
-  const assignmentRows = companyIds.length
-    ? await db.select().from(orgAssignments).where(inArray(orgAssignments.companyId, companyIds))
-    : [];
   const companyRows = companyIds.length
     ? await db.select().from(companies).where(inArray(companies.id, companyIds))
     : [];
-  const treeCompanies = companyRows.map((company) => ({
-    id: company.id,
-    name: company.name,
-    departments: departmentRows
-      .filter((department) => department.companyId === company.id)
-      .map((department) => ({
-        id: department.id,
-        name: department.name,
-        isDemo: department.isDemo,
-        positions: positionRows
-          .filter((position) => position.companyId === company.id && position.departmentId === department.id)
-          .map((position) => {
-            const assignment = assignmentRows.find((item) => item.positionId === position.id);
-            const person = people.find((item) => item.id === assignment?.personId) ?? null;
-            return { id: position.id, title: position.title, vacant: !person, person };
-          })
-          .filter((position) => matches(position, needle)),
-      }))
-      .filter((department) => department.positions.length > 0 || needle === ""),
-  }));
-  const vacant = treeCompanies.flatMap((company) =>
-    company.departments.flatMap((department) =>
-      department.positions
-        .filter((position) => position.vacant)
-        .map((position) => ({ id: position.id, title: position.title, companyId: company.id, departmentName: department.name })),
-    ),
-  );
-  return { companies: treeCompanies, vacant };
+  const treeCompanies = companyRows.map((company) => {
+    const grouped = new Map<string, OrgPerson[]>();
+    for (const person of people) {
+      const placement = person.companies.find((item) => item.companyId === company.id);
+      if (!placement) continue;
+      grouped.set(placement.departmentName, [...(grouped.get(placement.departmentName) ?? []), person]);
+    }
+    const departmentNames = [...grouped.keys()].sort((left, right) => {
+      if (left === "No department") return 1;
+      if (right === "No department") return -1;
+      return left.localeCompare(right);
+    });
+    return {
+      id: company.id,
+      name: company.name,
+      directory: unavailable.has(company.id) ? ("unavailable" as const) : ("ready" as const),
+      departments: departmentNames
+        .map((departmentName) => ({
+          id: `${company.id}:${departmentName}`,
+          name: departmentName,
+          isDemo: false,
+          positions: (grouped.get(departmentName) ?? [])
+            .map((person) => ({
+              id: person.id,
+              title: person.companies.find((item) => item.companyId === company.id)?.positionTitle ?? "",
+              vacant: false,
+              person,
+            }))
+            .filter((position) => matches(position, departmentName, needle))
+            .sort((left, right) => (left.person?.displayName ?? "").localeCompare(right.person?.displayName ?? "") || left.id.localeCompare(right.id)),
+        }))
+        .filter((department) => department.positions.length > 0),
+    };
+  });
+  return { companies: treeCompanies, vacant: [] };
 }
 
-function matches(position: { title: string; person: OrgPerson | null }, needle: string): boolean {
+function matches(position: { title: string; person: OrgPerson | null }, departmentName: string, needle: string): boolean {
   if (!needle) return true;
   const person = position.person;
-  const values = [position.title, person?.displayName ?? "", ...(person?.companies.map((item) => `${item.departmentName} ${item.positionTitle}`) ?? [])];
+  const values = [position.title, departmentName, person?.displayName ?? "", person?.employeeCode ?? ""];
   return values.some((value) => value.toLowerCase().includes(needle));
 }
 
-async function loadPeople(db: AuthDatabase, companyIds: string[]): Promise<OrgPerson[]> {
-  if (companyIds.length === 0) return [];
-  const assignmentRows = await db.select().from(orgAssignments).where(inArray(orgAssignments.companyId, companyIds));
-  const personIds = [...new Set(assignmentRows.map((row) => row.personId))];
-  if (personIds.length === 0) return [];
-  const personRows = await db.select().from(orgPeople).where(inArray(orgPeople.id, personIds));
-  const positionRows = await db.select().from(orgPositions).where(inArray(orgPositions.companyId, companyIds));
-  const departmentRows = await db.select().from(departments).where(inArray(departments.companyId, companyIds));
-  const companyRows = await db.select().from(companies).where(inArray(companies.id, companyIds));
-  const names = new Map(personRows.map((person) => [person.id, person.displayName]));
-  return personRows.map((person) => {
-    const placements = assignmentRows
-      .filter((assignment) => assignment.personId === person.id)
-      .map((assignment) => ({
-        companyId: assignment.companyId,
-        companyName: companyRows.find((company) => company.id === assignment.companyId)?.name ?? assignment.companyId,
-        departmentId: assignment.departmentId,
-        departmentName: departmentRows.find((department) => department.companyId === assignment.companyId && department.id === assignment.departmentId)?.name ?? assignment.departmentId,
-        positionId: assignment.positionId,
-        positionTitle: positionRows.find((position) => position.id === assignment.positionId)?.title ?? assignment.positionId,
-        managerPersonId: assignment.managerPersonId,
-        managerName: assignment.managerPersonId ? names.get(assignment.managerPersonId) ?? null : null,
-      }));
-    const card: OrgPerson = {
-      id: person.id,
-      displayName: person.displayName,
-      employmentStatus: person.employmentStatus,
-      isDemo: true,
-      companies: placements,
-    };
-    assertPersonShape(card);
-    return card;
-  });
+async function assigneeNames(db: AuthDatabase, personIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(personIds)];
+  if (ids.length === 0) return new Map();
+  const rows = await db.select({ id: orgPeople.id, displayName: orgPeople.displayName }).from(orgPeople).where(inArray(orgPeople.id, ids));
+  return new Map(rows.map((row) => [row.id, row.displayName]));
 }
 
 function assertPersonShape(person: OrgPerson): void {

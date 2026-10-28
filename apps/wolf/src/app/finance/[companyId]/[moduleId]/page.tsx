@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { loadActorContext } from "@/server/access/session-actor";
-import { financeWorkspace, listFinanceCompanies } from "@/server/finance/companies";
+import { grantedFinanceAccess } from "@/server/access/operating-grants";
 import { financeModuleIsEnabled, isFinanceModuleId, type FinanceModuleId } from "@/server/finance/modules";
 import { FinanceApplication } from "../../finance-application";
 
@@ -17,7 +17,8 @@ export default function FinanceModulePage({ params }: { params: Promise<{ compan
 async function Module({ params }: { params: Promise<{ companyId: string; moduleId: string }> }) {
   const { companyId, moduleId } = await params;
   const context = await loadActorContext();
-  if (context.status === "ready" && financeWorkspace(context.actor, companyId) === "procurement") {
+  const finance = context.status === "ready" ? await grantedFinanceAccess(context.db, context.actor) : null;
+  if (finance && finance.workspace(companyId) === "procurement") {
     return (
       <div className="flex flex-col gap-6 p-6">
         <EmptyState title="Access denied" body="This account opens its granted module from the company in Finance. No other finance feature is shown." />
@@ -33,7 +34,7 @@ async function Module({ params }: { params: Promise<{ companyId: string; moduleI
       </div>
     );
   }
-  const cards = await listFinanceCompanies(context.db, context.actor);
+  const cards = finance?.cards ?? [];
   if (!cards.some((card) => card.companyId === companyId) || !(await financeModuleIsEnabled(context.db, companyId, moduleId as FinanceModuleId))) {
     return (
       <div className="flex flex-col gap-6 p-6">

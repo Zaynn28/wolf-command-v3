@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hrAssertionCookie, signHrAssertion } from "./assertion";
+import { hrAssertionCookie, signHrAssertion, verifyHrAssertion } from "./assertion";
 import { executeHrRuntime } from "./runtime-handler";
 
 const secret = "local-test-assertion-secret-32chars";
@@ -55,7 +55,20 @@ async function run(input: {
       return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
     },
   });
-  return { status: result.response.status, body: await result.response.json().catch(() => null), called, forwarded, forwardedHeaders: captured.headers };
+  return {
+    status: result.response.status,
+    body: await result.response.json().catch(() => null),
+    called,
+    forwarded,
+    forwardedHeaders: captured.headers,
+    setCookie: result.response.headers.get("set-cookie"),
+  };
+}
+
+function issuedAssertion(setCookie: string | null): string {
+  const pair = setCookie?.split(";")[0] ?? "";
+  const separator = pair.indexOf("=");
+  return separator === -1 ? "" : pair.slice(separator + 1);
 }
 
 test("a signed-out request is denied before an unexpired assertion is accepted", async () => {
@@ -63,6 +76,7 @@ test("a signed-out request is denied before an unexpired assertion is accepted",
   const result = await run({ path: "/__wolf/session", actorStatus: "signed_out", headers });
   assert.equal(result.status, 401);
   assert.equal(result.called, false);
+  assert.equal(result.setCookie, null);
   assert.equal(JSON.stringify(result.body).includes("person@example.test"), false);
 });
 
@@ -111,10 +125,30 @@ test("an employee session opens the company and does not receive HR staff or pay
   assert.equal(JSON.stringify(session.body).includes("personId"), false);
   const employees = await run({ path: "/api/employees", companyId: "amg", hrAccess: "employee", headers });
   const payroll = await run({ path: "/api/payroll-periods", companyId: "amg", hrAccess: "employee", headers });
+  const directSave = await run({
+    path: "/api/employees/11111111-1111-1111-1111-111111111111",
+    method: "PATCH",
+    companyId: "amg",
+    hrAccess: "employee",
+    headers,
+    body: "{}",
+  });
+  const ownRequest = await run({
+    path: "/api/profile-change-requests",
+    method: "POST",
+    companyId: "amg",
+    hrAccess: "employee",
+    headers,
+    body: "{}",
+  });
   assert.equal(employees.status, 403);
   assert.equal(employees.called, false);
   assert.equal(payroll.status, 403);
   assert.equal(payroll.called, false);
+  assert.equal(directSave.status, 403);
+  assert.equal(directSave.called, false);
+  assert.equal(ownRequest.status, 200);
+  assert.equal(ownRequest.called, true);
 });
 
 test("an assertion for another company does not open this company", async () => {
@@ -122,6 +156,30 @@ test("an assertion for another company does not open this company", async () => 
   const result = await run({ path: "/__wolf/session", companyId: "bzg", headers });
   assert.equal(result.status, 403);
   assert.equal(result.called, false);
+  assert.equal(result.setCookie, null);
+});
+
+test("a signed-in company session issues an assertion when the cookie is missing", async () => {
+  const result = await run({ path: "/__wolf/session", companyId: "amg" });
+  assert.equal(result.status, 200);
+  assert.equal((result.body as { email?: string }).email, "person@example.test");
+  assert.equal(result.called, false);
+  const token = issuedAssertion(result.setCookie);
+  assert.equal(verifyHrAssertion(token, secret, now + 10, { userId: "user-1", companyId: "amg" })?.companyId, "amg");
+  assert.equal(verifyHrAssertion(token, secret, now + 121, { userId: "user-1", companyId: "amg" }), null);
+});
+
+test("an expired assertion is refreshed for the signed-in company and is not forwarded to the HR API", async () => {
+  const headers = new Headers({ cookie: cookie("amg") });
+  const session = await run({ path: "/__wolf/session", companyId: "amg", headers, nowSeconds: now + 121 });
+  assert.equal(session.status, 200);
+  assert.equal(session.called, false);
+  const token = issuedAssertion(session.setCookie);
+  assert.equal(verifyHrAssertion(token, secret, now + 121, { userId: "user-1", companyId: "amg" })?.sub, "user-1");
+  assert.equal(verifyHrAssertion(token, secret, now + 242, { userId: "user-1", companyId: "amg" }), null);
+  const api = await run({ path: "/api/employees", companyId: "amg", headers, nowSeconds: now + 121 });
+  assert.equal(api.status, 403);
+  assert.equal(api.called, false);
 });
 
 test("development file reads, traversal, and state changes do not reach the upstream", async () => {

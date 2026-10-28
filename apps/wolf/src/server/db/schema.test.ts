@@ -34,6 +34,11 @@ test("the password migration is forward-only and keeps current audit events", ()
     "0015_access_policy.sql",
     "0016_ai_command.sql",
     "0017_ai_provider.sql",
+    "0018_idr_foundation.sql",
+    "0019_org_hr_links.sql",
+    "0020_org_hr_tasks.sql",
+    "0021_company_operating_system.sql",
+    "0022_company_operating_grants.sql",
   ]);
   const source = readFileSync(new URL("./migrations/0002_password_auth.sql", import.meta.url), "utf8").toLowerCase();
   assert.equal(source.includes("insert into"), false);

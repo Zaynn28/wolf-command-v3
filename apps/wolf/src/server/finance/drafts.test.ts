@@ -24,7 +24,7 @@ async function readyCompany(db: AuthDatabase, operator: Actor, companyId: string
   const created = await createCompany(
     db,
     operator,
-    { companyId, name: companyId, currencyCode: "USD", minorScale: 2 },
+    { companyId, name: companyId, currencyCode: "IDR", minorScale: 0 },
     now,
   );
   assert.equal(created.status, "created");
@@ -51,8 +51,8 @@ test("draft journals stay inside the company and compare debits exactly", async 
         periodKey: "2026-10",
         memo: "opening",
         lines: [
-          { accountCode: "1000", side: "debit", amount: "10.10" },
-          { accountCode: "4000", side: "credit", amount: "10.10" },
+          { accountCode: "1000", side: "debit", amount: "10" },
+          { accountCode: "4000", side: "credit", amount: "10" },
         ],
       },
       now,
@@ -69,8 +69,8 @@ test("draft journals stay inside the company and compare debits exactly", async 
         periodKey: "2026-10",
         memo: "revised",
         lines: [
-          { accountCode: "1000", side: "debit", amount: "4.00" },
-          { accountCode: "4000", side: "credit", amount: "4.00" },
+          { accountCode: "1000", side: "debit", amount: "4" },
+          { accountCode: "4000", side: "credit", amount: "4" },
         ],
       },
       now,
@@ -92,8 +92,8 @@ test("draft journals stay inside the company and compare debits exactly", async 
         periodKey: "2026-10",
         memo: "other",
         lines: [
-          { accountCode: "1000", side: "debit", amount: "1.00" },
-          { accountCode: "4000", side: "credit", amount: "1.00" },
+          { accountCode: "1000", side: "debit", amount: "1" },
+          { accountCode: "4000", side: "credit", amount: "1" },
         ],
       },
       now,
@@ -131,8 +131,8 @@ test("a BZG finance user cannot read or change GGV drafts", async () => {
         periodKey: "2026-10",
         memo: "bzg only",
         lines: [
-          { accountCode: "1000", side: "debit", amount: "2.50" },
-          { accountCode: "4000", side: "credit", amount: "2.50" },
+          { accountCode: "1000", side: "debit", amount: "3" },
+          { accountCode: "4000", side: "credit", amount: "3" },
         ],
       },
       now,
@@ -165,8 +165,8 @@ test("a BZG finance user cannot read or change GGV drafts", async () => {
         periodKey: "2026-10",
         memo: "taken",
         lines: [
-          { accountCode: "1000", side: "debit", amount: "2.50" },
-          { accountCode: "4000", side: "credit", amount: "2.50" },
+          { accountCode: "1000", side: "debit", amount: "3" },
+          { accountCode: "4000", side: "credit", amount: "3" },
         ],
       },
       now,

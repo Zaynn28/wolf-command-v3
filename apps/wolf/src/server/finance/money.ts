@@ -31,3 +31,52 @@ export function storedNumeric(canonical: string): string {
   if (!parsed.ok) return canonical.includes(".") ? canonical.padEnd(canonical.split(".")[0].length + 5, "0") : `${canonical}.0000`;
   return formatUnits(parsed.units, 4);
 }
+
+export const bookCurrency = "IDR";
+export const idrDisplayScale = 0;
+export const internalScale = 4;
+export const roundingModes = ["half-up", "half-even", "down"] as const;
+export type RoundingMode = (typeof roundingModes)[number];
+
+const internalDivisor = 10n ** BigInt(internalScale);
+
+export function isRoundingMode(value: string): value is RoundingMode {
+  return (roundingModes as readonly string[]).includes(value);
+}
+
+export function roundDocumentTotal(internalUnits: bigint, mode: RoundingMode = "half-up"): bigint {
+  const negative = internalUnits < 0n;
+  const absolute = negative ? -internalUnits : internalUnits;
+  const whole = absolute / internalDivisor;
+  const remainder = absolute % internalDivisor;
+  const half = internalDivisor / 2n;
+  let rounded = whole;
+  if (mode === "half-up" && remainder >= half) rounded = whole + 1n;
+  if (mode === "half-even" && (remainder > half || (remainder === half && whole % 2n === 1n))) rounded = whole + 1n;
+  return negative ? -rounded : rounded;
+}
+
+export function weightedAverageUnitCost(
+  onHandQty: bigint,
+  onHandUnitCost: bigint,
+  receiptQty: bigint,
+  receiptUnitCost: bigint,
+): bigint | null {
+  if (onHandQty < 0n || receiptQty <= 0n || onHandUnitCost < 0n || receiptUnitCost < 0n) return null;
+  const nextQty = onHandQty + receiptQty;
+  if (nextQty <= 0n) return null;
+  const value = onHandQty * onHandUnitCost + receiptQty * receiptUnitCost;
+  return roundDiv(value, nextQty, "half-up");
+}
+
+function roundDiv(value: bigint, divisor: bigint, mode: RoundingMode): bigint {
+  const negative = value < 0n;
+  const absolute = negative ? -value : value;
+  const whole = absolute / divisor;
+  const remainder = absolute % divisor;
+  const half = divisor / 2n;
+  let rounded = whole;
+  if (mode === "half-up" && remainder >= half) rounded = whole + 1n;
+  if (mode === "half-even" && (remainder > half || (remainder === half && whole % 2n === 1n))) rounded = whole + 1n;
+  return negative ? -rounded : rounded;
+}

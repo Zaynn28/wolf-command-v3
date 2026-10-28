@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { prepareRuntimeConnection, resolveRuntimeDatabaseTarget } from "./runtime-database";
+import { cloudSqlSocketPath, postgresHostOverride, prepareRuntimeConnection, resolveRuntimeDatabaseTarget } from "./runtime-database";
 
 const localUrl = "postgresql://wolf:wolf@127.0.0.1:5433/wolf_command";
 const secret = "printed-secret-token";
@@ -62,6 +62,32 @@ test("runtime production target uses its own contract", () => {
       assert.equal(result.reason, reason);
       assert.equal(result.message.includes(secret), false);
       assert.equal(result.message.includes(hash), false);
+      assert.equal(result.message.includes("postgresql://"), false);
+    }
+  }
+});
+
+test("runtime production target accepts a Cloud SQL socket and rejects a loose one", () => {
+  const socket = "/cloudsql/wolf-intel-jakarta:asia-southeast2:wolf-command";
+  const socketUrl = `postgresql://wolf:${secret}@${encodeURIComponent(socket)}/wolf_command`;
+  assert.equal(cloudSqlSocketPath(socketUrl), socket);
+  assert.deepEqual(postgresHostOverride(socketUrl), { host: socket });
+  assert.deepEqual(decision(socketUrl, "production"), { ok: true, databaseUrl: socketUrl });
+  assert.equal(decision(socketUrl, "development").ok, false);
+
+  const rejected: Array<[string, string]> = [
+    [`postgresql://wolf:${secret}@${encodeURIComponent("/cloudsql/nope")}/wolf_command`, "host"],
+    [`postgresql://wolf:${secret}@${encodeURIComponent(socket)}:5432/wolf_command`, "port"],
+    [`postgresql://${encodeURIComponent(socket)}/wolf_command`, "credentials"],
+    [`postgresql://wolf:${secret}@${encodeURIComponent(socket)}/wolf_command?sslmode=disable`, "host"],
+    [`postgresql://wolf:${secret}@${encodeURIComponent("/cloudsql/../wolf-intel-jakarta:asia-southeast2:wolf-command")}/wolf_command`, "host"],
+  ];
+  for (const [databaseUrl, reason] of rejected) {
+    const result = decision(databaseUrl, "production");
+    assert.equal(result.ok, false, databaseUrl);
+    if (!result.ok) {
+      assert.equal(result.reason, reason);
+      assert.equal(result.message.includes(secret), false);
       assert.equal(result.message.includes("postgresql://"), false);
     }
   }

@@ -296,11 +296,14 @@ export const financeSettings = pgTable(
     currencyCode: text("currency_code").notNull(),
     minorScale: integer("minor_scale").notNull(),
     workspaceKind: text("workspace_kind").notNull().default("shared"),
+    roundingMode: text("rounding_mode").notNull().default("half-up"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
     check("finance_settings_currency_check", sql`${table.currencyCode} ~ '^[A-Z]{3}$'`),
     check("finance_settings_scale_check", sql`${table.minorScale} between 0 and 4`),
+    check("finance_settings_idr_check", sql`${table.currencyCode} = 'IDR' and ${table.minorScale} = 0`),
+    check("finance_settings_rounding_check", sql`${table.roundingMode} in ('half-up', 'half-even', 'down')`),
     check("finance_settings_workspace_check", sql`${table.workspaceKind} in ('shared', 'amg')`),
   ],
 );
@@ -669,6 +672,11 @@ export const orgPeople = pgTable(
     displayName: text("display_name").notNull(),
     employmentStatus: text("employment_status").notNull(),
     isDemo: boolean("is_demo").notNull(),
+    source: text("source").notNull().default("demo"),
+    companyId: text("company_id"),
+    employeeCode: text("employee_code"),
+    departmentName: text("department_name"),
+    positionTitle: text("position_title"),
     linkedUserId: uuid("linked_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
@@ -679,9 +687,20 @@ export const orgPeople = pgTable(
       foreignColumns: [users.id],
       name: "org_people_linked_user_fk",
     }).onDelete("set null"),
-    check("org_people_demo_check", sql`${table.isDemo} = true and ${table.id} ~ '^demo-[a-z0-9-]{1,48}$'`),
+    foreignKey({
+      columns: [table.companyId],
+      foreignColumns: [companies.id],
+      name: "org_people_company_fk",
+    }).onDelete("restrict"),
+    unique("org_people_hr_code_key").on(table.companyId, table.employeeCode),
+    check(
+      "org_people_demo_check",
+      sql`(${table.source} = 'demo' and ${table.isDemo} = true and ${table.id} ~ '^demo-[a-z0-9-]{1,48}$' and ${table.companyId} is null and ${table.employeeCode} is null) or (${table.source} = 'hr' and ${table.isDemo} = false and ${table.companyId} in ('amg', 'bzg', 'ggv') and ${table.employeeCode} ~ '^[A-Z0-9][A-Z0-9-]{1,31}$' and ${table.id} ~ '^hr-[a-z0-9-]{1,64}$')`,
+    ),
     check("org_people_status_check", sql`${table.employmentStatus} in ('active', 'leave', 'inactive')`),
     check("org_people_name_check", sql`length(btrim(${table.displayName})) between 1 and 120`),
+    check("org_people_department_check", sql`${table.departmentName} is null or length(btrim(${table.departmentName})) between 1 and 120`),
+    check("org_people_position_check", sql`${table.positionTitle} is null or length(btrim(${table.positionTitle})) between 1 and 120`),
   ],
 );
 
@@ -762,6 +781,7 @@ export const orgTasks = pgTable(
     createdByUserId: uuid("created_by_user_id"),
     submittedByUserId: uuid("submitted_by_user_id"),
     isDemo: boolean("is_demo").notNull(),
+    hrExternalId: text("hr_external_id"),
     completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
@@ -788,7 +808,12 @@ export const orgTasks = pgTable(
       name: "org_tasks_submitted_by_fk",
     }).onDelete("restrict"),
     index("org_tasks_company_status").on(table.companyId, table.status),
-    check("org_tasks_demo_check", sql`${table.isDemo} = true and ${table.id} ~ '^demo-task-[a-z0-9-]{1,40}$'`),
+    unique("org_tasks_hr_external_key").on(table.hrExternalId),
+    check(
+      "org_tasks_demo_check",
+      sql`(${table.isDemo} = true and ${table.id} ~ '^demo-task-[a-z0-9-]{1,40}$') or (${table.isDemo} = false and ${table.hrExternalId} is not null and ${table.id} ~ '^hr-task-[a-z0-9-]{1,64}$')`,
+    ),
+    check("org_tasks_hr_external_check", sql`${table.hrExternalId} is null or ${table.hrExternalId} ~ '^[a-z0-9][a-z0-9:_-]{2,80}$'`),
     check("org_tasks_priority_check", sql`${table.priority} in ('low', 'normal', 'high')`),
     check("org_tasks_status_check", sql`${table.status} in ('ASSIGNED', 'ACCEPTED', 'IN_PROGRESS', 'BLOCKED', 'IN_REVIEW', 'COMPLETED')`),
     check("org_tasks_assignment_check", sql`${table.assigneePersonId} is not null or ${table.teamDepartmentId} is not null`),
@@ -1198,5 +1223,151 @@ export const aiRequests = pgTable(
       name: "ai_requests_user_fk",
     }).onDelete("cascade"),
     index("ai_requests_user_created").on(table.userId, table.createdAt),
+  ],
+);
+
+export const companyOperatingUnits = pgTable(
+  "company_operating_units",
+  {
+    companyId: text("company_id").notNull().references(() => companies.id, { onDelete: "restrict" }),
+    unitCode: text("unit_code").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary").notNull(),
+    profile: text("profile").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    status: text("status").notNull().default("active"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.companyId, table.unitCode] }),
+    check("company_operating_units_code_check", sql`${table.unitCode} ~ '^[a-z][a-z0-9-]{0,31}$'`),
+    check("company_operating_units_name_check", sql`length(btrim(${table.name})) between 1 and 80`),
+    check("company_operating_units_summary_check", sql`length(${table.summary}) between 1 and 400`),
+    check("company_operating_units_profile_check", sql`${table.profile} in ('hotel', 'neutral')`),
+    check("company_operating_units_sort_check", sql`${table.sortOrder} between 0 and 1000`),
+    check("company_operating_units_status_check", sql`${table.status} in ('active', 'inactive')`),
+  ],
+);
+
+export const companyOperatingRoles = pgTable(
+  "company_operating_roles",
+  {
+    companyId: text("company_id").notNull(),
+    roleCode: text("role_code").notNull(),
+    unitCode: text("unit_code").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary").notNull(),
+    profile: text("profile").notNull(),
+    status: text("status").notNull().default("active"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.companyId, table.roleCode] }),
+    foreignKey({
+      columns: [table.companyId, table.unitCode],
+      foreignColumns: [companyOperatingUnits.companyId, companyOperatingUnits.unitCode],
+      name: "company_operating_roles_unit_fk",
+    }).onDelete("restrict"),
+    check("company_operating_roles_code_check", sql`${table.roleCode} ~ '^[a-z][a-z0-9-]{0,40}$'`),
+    check("company_operating_roles_name_check", sql`length(btrim(${table.name})) between 1 and 80`),
+    check("company_operating_roles_summary_check", sql`length(${table.summary}) between 1 and 400`),
+    check("company_operating_roles_profile_check", sql`${table.profile} in ('hotel', 'neutral')`),
+    check("company_operating_roles_status_check", sql`${table.status} in ('active', 'inactive')`),
+    check("company_operating_roles_wolf_name_check", sql`lower(btrim(${table.name})) not in ('staff', 'administrator', 'owner')`),
+  ],
+);
+
+export const companyOperatingResponsibilities = pgTable(
+  "company_operating_responsibilities",
+  {
+    companyId: text("company_id").notNull(),
+    roleCode: text("role_code").notNull(),
+    responsibilityCode: text("responsibility_code").notNull(),
+    label: text("label").notNull(),
+    detail: text("detail").notNull(),
+    capabilityId: text("capability_id").notNull(),
+    hotelOnly: boolean("hotel_only").notNull().default(false),
+    profile: text("profile").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.companyId, table.roleCode, table.responsibilityCode] }),
+    foreignKey({
+      columns: [table.companyId, table.roleCode],
+      foreignColumns: [companyOperatingRoles.companyId, companyOperatingRoles.roleCode],
+      name: "company_operating_responsibilities_role_fk",
+    }).onDelete("restrict"),
+    check("company_operating_responsibilities_code_check", sql`${table.responsibilityCode} ~ '^[a-z][a-z0-9.-]{0,63}$'`),
+    check("company_operating_responsibilities_label_check", sql`length(btrim(${table.label})) between 1 and 80`),
+    check("company_operating_responsibilities_detail_check", sql`length(${table.detail}) between 1 and 400`),
+    check("company_operating_responsibilities_profile_check", sql`${table.profile} in ('hotel', 'neutral')`),
+    check("company_operating_responsibilities_hotel_check", sql`${table.hotelOnly} = false or ${table.profile} = 'hotel'`),
+    check("company_operating_responsibilities_sort_check", sql`${table.sortOrder} between 0 and 1000`),
+    check("company_operating_responsibilities_capability_check", accessCapabilityCheck),
+    check(
+      "company_operating_responsibilities_private_check",
+      sql`${table.capabilityId} not in ('grant.owner_private', 'grant.approve.owner_private')`,
+    ),
+  ],
+);
+
+const hotelOperatingGrantCodes = [
+  "finance.usali",
+  "finance.owner-pool",
+  "finance.integrations",
+  "finance.service-charge",
+  "finance.night-audit",
+  "finance.pms",
+  "finance.guest-ledger",
+  "rooms.interface",
+] as const;
+
+export const companyOperatingRoleGrants = pgTable(
+  "company_operating_role_grants",
+  {
+    companyId: text("company_id").notNull(),
+    roleCode: text("role_code").notNull(),
+    grantCode: text("grant_code").notNull(),
+    enabled: boolean("enabled").notNull(),
+    profile: text("profile").notNull(),
+    hotelOnly: boolean("hotel_only").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.companyId, table.roleCode, table.grantCode] }),
+    foreignKey({
+      columns: [table.companyId, table.roleCode],
+      foreignColumns: [companyOperatingRoles.companyId, companyOperatingRoles.roleCode],
+      name: "company_operating_role_grants_role_fk",
+    }).onDelete("restrict"),
+    index("company_operating_role_grants_company_idx").on(table.companyId, table.roleCode),
+    check("company_operating_role_grants_code_check", sql`${table.grantCode} ~ '^[a-z][a-z0-9.-]{0,63}$'`),
+    check("company_operating_role_grants_profile_check", sql`${table.profile} in ('hotel', 'neutral')`),
+    check("company_operating_role_grants_hotel_check", sql`${table.hotelOnly} = false or ${table.profile} = 'hotel'`),
+    check(
+      "company_operating_role_grants_hotel_code_check",
+      sql`${table.profile} = 'hotel' or ${table.grantCode} not in (${sql.join(hotelOperatingGrantCodes.map((code) => sql`${code}`), sql`, `)})`,
+    ),
+    check(
+      "company_operating_role_grants_private_check",
+      sql`${table.grantCode} not in ('owner_private', 'grant.owner_private', 'grant.approve.owner_private', 'finance.journal.post', 'finance.post', 'finance.draft.approve', 'assistant.key')`,
+    ),
+  ],
+);
+
+export const companyOperatingRoleAssignments = pgTable(
+  "company_operating_role_assignments",
+  {
+    companyId: text("company_id").notNull(),
+    roleCode: text("role_code").notNull(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+    assignedAt: timestamp("assigned_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.companyId, table.roleCode, table.userId] }),
+    foreignKey({
+      columns: [table.companyId, table.roleCode],
+      foreignColumns: [companyOperatingRoles.companyId, companyOperatingRoles.roleCode],
+      name: "company_operating_role_assignments_role_fk",
+    }).onDelete("restrict"),
+    index("company_operating_role_assignments_user_idx").on(table.userId, table.companyId),
   ],
 );

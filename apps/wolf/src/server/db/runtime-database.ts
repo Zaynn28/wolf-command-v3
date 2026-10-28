@@ -29,6 +29,8 @@ const refusalMessage: Record<RuntimeDatabaseRefusal, string> = {
 };
 
 const productionTlsModes = new Set(["require", "verify-ca", "verify-full"]);
+const cloudSqlSocket =
+  /^\/cloudsql\/[a-z][a-z0-9-]{4,28}[a-z0-9]:[a-z]+(?:-[a-z0-9]+)*:[a-z][a-z0-9-]{0,96}[a-z0-9]$/;
 
 function refuse(reason: RuntimeDatabaseRefusal): RuntimeDatabaseTarget {
   return { ok: false, reason, message: refusalMessage[reason] };
@@ -52,9 +54,40 @@ function parseDatabaseUrl(databaseUrl: string): URL | null {
   }
 }
 
+export function cloudSqlSocketPath(databaseUrl: string): string | null {
+  const url = parseDatabaseUrl(databaseUrl);
+  if (!url || !url.username || !url.password || url.port || url.search) return null;
+  if (!/^\/[^/]+$/.test(url.pathname)) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(url.hostname);
+  } catch {
+    return null;
+  }
+  return cloudSqlSocket.test(decoded) ? decoded : null;
+}
+
+export function postgresHostOverride(databaseUrl: string): { host?: string } {
+  const socket = cloudSqlSocketPath(databaseUrl);
+  return socket ? { host: socket } : {};
+}
+
 function resolveProductionDatabaseTarget(databaseUrl: string): RuntimeDatabaseTarget {
   const url = parseDatabaseUrl(databaseUrl);
   if (!url) return refuse("malformed");
+  let decodedHost = url.hostname;
+  try {
+    decodedHost = decodeURIComponent(url.hostname);
+  } catch {
+    return refuse("malformed");
+  }
+  if (decodedHost.startsWith("/cloudsql/")) {
+    if (!url.username || !url.password) return refuse("credentials");
+    if (url.port) return refuse("port");
+    if (!/^\/[^/]+$/.test(url.pathname)) return refuse("database");
+    if (!cloudSqlSocket.test(decodedHost) || url.search) return refuse("host");
+    return { ok: true, databaseUrl };
+  }
   if (!url.hostname || isLoopbackOrWildcardHost(url.hostname)) return refuse("host");
   if (!/^[1-9][0-9]*$/.test(url.port) || Number(url.port) > 65535) return refuse("port");
   if (!/^\/[^/]+$/.test(url.pathname)) return refuse("database");

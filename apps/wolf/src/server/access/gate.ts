@@ -1,9 +1,8 @@
 import "server-only";
-import { cookies } from "next/headers";
 import { connection } from "next/server";
 import type { Action } from "@wolf/shared";
 import { readAuthConfig } from "../auth/config";
-import { sessionCookieName } from "../auth/constants";
+import { readSessionToken } from "../auth/current-session";
 import { getDb } from "../db/runtime";
 import type { ModuleId } from "./matrix";
 import { openModule, type ModuleQuery, type ModuleView } from "./open-module";
@@ -16,7 +15,7 @@ export async function loadGuardedModule(
   action: Action = "read",
 ): Promise<GuardedModuleState> {
   await connection();
-  const token = (await cookies()).get(sessionCookieName)?.value ?? null;
+  const token = await readSessionToken();
   if (!token) return { state: "signed_out" };
   const config = readAuthConfig(process.env);
   if (!config) return { state: "unavailable" };

@@ -1,9 +1,8 @@
 import "server-only";
-import { cookies } from "next/headers";
 import { connection } from "next/server";
 import type { Actor } from "@wolf/shared";
 import { readAuthConfig } from "../auth/config";
-import { sessionCookieName } from "../auth/constants";
+import { readSessionToken } from "../auth/current-session";
 import { readSession } from "../auth/session";
 import { getDb } from "../db/runtime";
 import type { AuthDatabase } from "../db/types";
@@ -15,7 +14,7 @@ export type ActorContext =
 
 export async function loadActorContext(): Promise<ActorContext> {
   await connection();
-  const token = (await cookies()).get(sessionCookieName)?.value ?? null;
+  const token = await readSessionToken();
   if (!token) return { status: "signed_out" };
   const config = readAuthConfig(process.env);
   if (!config) return { status: "unavailable" };

@@ -3,6 +3,7 @@ import type { Actor } from "@wolf/shared";
 import { evaluateModuleAccess } from "../access/matrix";
 import { companies, financeSettings } from "../db/schema";
 import type { AuthDatabase } from "../db/types";
+import { visibleOperatorCompanyId } from "../companies/operator-list";
 import { financeModuleIsEnabled } from "./modules";
 
 export type FinanceCompanyCard = {
@@ -29,6 +30,7 @@ export function financeSurfaceLabel(actor: Actor, companyId: string): string | n
 export function financeCompanyIds(actor: Actor): string[] {
   const ids = new Set<string>();
   for (const membership of actor.memberships) {
+    if (!visibleOperatorCompanyId(membership.companyId)) continue;
     if (financeWorkspace(actor, membership.companyId)) ids.add(membership.companyId);
   }
   return [...ids].sort();

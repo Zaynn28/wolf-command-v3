@@ -38,11 +38,12 @@ export type HrAssertion = {
   iat: number;
   exp: number;
   jti: string;
+  workspace?: "hr" | "self";
 };
 
 export function signHrAssertion(
   secret: string,
-  claims: { sub: string; companyId: HrAssertion["companyId"]; iat: number; jti: string },
+  claims: { sub: string; companyId: HrAssertion["companyId"]; iat: number; jti: string; workspace?: "hr" | "self" },
 ): string {
   const payload: HrAssertion = {
     iss: issuer,
@@ -52,18 +53,15 @@ export function signHrAssertion(
     iat: claims.iat,
     exp: claims.iat + ttlSeconds,
     jti: claims.jti,
+    ...(claims.workspace === "hr" || claims.workspace === "self" ? { workspace: claims.workspace } : {}),
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = createHmac("sha256", secret).update(encoded).digest("base64url");
   return `${encoded}.${signature}`;
 }
 
-export function verifyHrAssertion(
-  token: string,
-  secret: string,
-  nowSeconds: number,
-  expected: { userId: string; companyId: string },
-): HrAssertion | null {
+/** Signature and claim shape only. Expiry and the expected user are checked separately so a live Wolf session can refresh an expired company assertion. */
+export function readSignedHrAssertion(token: string, secret: string): HrAssertion | null {
   const parts = token.split(".");
   if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
   const expectedSignature = createHmac("sha256", secret).update(parts[0]).digest("base64url");
@@ -78,10 +76,23 @@ export function verifyHrAssertion(
   }
   if (parsed.iss !== issuer || parsed.aud !== audience) return null;
   if (parsed.companyId !== "amg" && parsed.companyId !== "bzg" && parsed.companyId !== "ggv") return null;
-  if (parsed.sub !== expected.userId || parsed.companyId !== expected.companyId) return null;
+  if (typeof parsed.sub !== "string" || parsed.sub.trim() === "") return null;
   if (typeof parsed.jti !== "string" || parsed.jti.length < 16) return null;
   if (!Number.isFinite(parsed.iat) || !Number.isFinite(parsed.exp)) return null;
-  if (parsed.iat > nowSeconds + 30 || parsed.exp <= nowSeconds || parsed.exp - parsed.iat > ttlSeconds) return null;
+  if (parsed.exp - parsed.iat > ttlSeconds) return null;
+  return parsed;
+}
+
+export function verifyHrAssertion(
+  token: string,
+  secret: string,
+  nowSeconds: number,
+  expected: { userId: string; companyId: string },
+): HrAssertion | null {
+  const parsed = readSignedHrAssertion(token, secret);
+  if (!parsed) return null;
+  if (parsed.sub !== expected.userId || parsed.companyId !== expected.companyId) return null;
+  if (parsed.iat > nowSeconds + 30 || parsed.exp <= nowSeconds) return null;
   return parsed;
 }
 

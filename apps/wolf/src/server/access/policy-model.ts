@@ -1,6 +1,7 @@
 import type { Action, Actor, Grant, Membership, Role } from "@wolf/shared";
 import { authorizeProvisioning } from "./matrix";
 import { departmentServesModule, evaluateModuleAccess, moduleIds, moduleMatrix, type ModuleId } from "./matrix";
+import { visibleOperatorCompanyId } from "../companies/operator-list";
 import { financeWorkspace, type FinanceWorkspace } from "../finance/companies";
 import { hrAccess, type HrAccess } from "../hr/companies";
 
@@ -168,7 +169,9 @@ export function canManageAccessPolicies(actor: Actor | null): boolean {
 
 export function managedCompanyIds(actor: Actor | null): string[] {
   if (!actor) return [];
-  return [...new Set(actor.memberships.filter((membership) => isManagerRole(membership.role)).map((membership) => membership.companyId))].sort();
+  return [...new Set(actor.memberships.filter((membership) => isManagerRole(membership.role)).map((membership) => membership.companyId))]
+    .filter(visibleOperatorCompanyId)
+    .sort();
 }
 
 export function canManageCompany(actor: Actor | null, companyId: string): boolean {

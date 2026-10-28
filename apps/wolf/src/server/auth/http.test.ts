@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clientIpFromHeaders, normalizeIp, originsMatch, sessionCookieOptions } from "./http";
+import { clientIpFromHeaders, normalizeIp, originsMatch, sessionCookieOptions, tokenFromCookieHeader } from "./http";
 
 test("origin checks reject missing and cross-site requests", () => {
   assert.equal(originsMatch(null, "localhost:3000"), false);
@@ -21,6 +21,14 @@ test("client IP uses only the first forwarded hop", () => {
   );
   assert.equal(normalizeIp(" 203.0.113.4 "), "203.0.113.4");
   assert.equal(normalizeIp("bad ip"), null);
+});
+
+test("session token is taken from its own cookie", () => {
+  assert.equal(tokenFromCookieHeader(null, "wolf_session"), null);
+  assert.equal(tokenFromCookieHeader("other=1", "wolf_session"), null);
+  assert.equal(tokenFromCookieHeader("wolf_session=", "wolf_session"), null);
+  assert.equal(tokenFromCookieHeader("theme=dark; wolf_session=abc%3D123", "wolf_session"), "abc=123");
+  assert.equal(tokenFromCookieHeader("wolf_session=plain", "wolf_session"), "plain");
 });
 
 test("session cookies are HTTP-only with a site path and an explicit Secure flag", () => {

@@ -73,8 +73,8 @@ test("Atrium draft journals stay in the company, reject inexact amounts, and ign
     await db.insert(platformOperators).values({ userId: operatorUser.id, createdAt: now });
     const operator = actor(operatorUser.id, "amg", "administrator");
     assert.equal((await createCompany(db, operator, { companyId: "amg", name: "AMG", currencyCode: "IDR", minorScale: 0, workspaceKind: "amg" }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
     const bzgUser = await user(db, "bzg@wolf-command.test");
     const bzg = actor(bzgUser.id, "bzg");
     const bzgAdmin = actor(bzgUser.id, "bzg", "administrator");

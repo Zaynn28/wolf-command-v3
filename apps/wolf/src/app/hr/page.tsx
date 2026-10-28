@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { loadActorContext } from "@/server/access/session-actor";
-import { hrAccess, hrCompanyIds } from "@/server/hr/companies";
+import { grantedHrAccess } from "@/server/access/operating-grants";
 
 export default function HrPage() {
   return (
@@ -41,7 +41,8 @@ async function HrHome() {
     );
   }
 
-  const companyIds = hrCompanyIds(context.actor);
+  const hr = await grantedHrAccess(context.db, context.actor);
+  const companyIds = hr.ids;
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
@@ -60,7 +61,7 @@ async function HrHome() {
                 className="block rounded-lg border border-line bg-surface px-4 py-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               >
                 <p className="text-base font-semibold text-foreground">{companyId.toUpperCase()}</p>
-                <p className="mt-2 text-sm text-muted">{hrAccess(context.actor, companyId) === "employee" ? "Employee" : companyId}</p>
+                <p className="mt-2 text-sm text-muted">{hr.access(companyId) === "employee" ? "Employee" : companyId}</p>
               </Link>
             </li>
           ))}

@@ -1,9 +1,11 @@
+import { deniedFinanceHideLabels, financeFeatureGrant, financeGrantHideScript, financeWorkspaceWithGrants, operatingGrantEffect, readOperatingEnforcement } from "../access/operating-grants";
 import { loadActorContext } from "../access/session-actor";
 import {
   amgProxyDecision,
   amgProxySearch,
   amgRuntimeOrigin,
   amgSessionBootstrap,
+  bzgStandardBooks,
   procurementModuleLock,
   procurementRuntimeAllowed,
   amgUpstreamHeaders,
@@ -14,10 +16,9 @@ import {
   redactAmgStatus,
   rewriteAmgRuntimeText,
   scrubAmgPayload,
+  amgJournalReadsProcessMemory,
   usesAmgProcessMemory,
 } from "./amg-proxy";
-import { evaluateModuleAccess } from "../access/matrix";
-import { financeWorkspace } from "./companies";
 import { financeModuleIsEnabled, type FinanceModuleId } from "./modules";
 import {
   deactivateChartAccount,
@@ -48,7 +49,10 @@ import { injectWolfFinanceTheme } from "./wolf-finance-theme";
 
 export async function serveFinanceRuntime(request: Request, companyId: string, path: string, prefix: string): Promise<Response> {
   const actorContext = await loadActorContext();
-  const workspace = actorContext.status === "ready" ? financeWorkspace(actorContext.actor, companyId) : null;
+  const enforcement = actorContext.status === "ready"
+    ? await readOperatingEnforcement(actorContext.db, actorContext.actor.userId)
+    : { assignments: [], grants: [] };
+  const workspace = actorContext.status === "ready" ? financeWorkspaceWithGrants(actorContext.actor, companyId, enforcement) : null;
   if (actorContext.status !== "ready" || !workspace) {
     return Response.json({ error: "Finance is not available for this session." }, { status: 403 });
   }
@@ -68,6 +72,12 @@ export async function serveFinanceRuntime(request: Request, companyId: string, p
     return Response.json({ error: "That Finance operation is blocked." }, { status: 403 });
   }
 
+  if (workspace === "application") {
+    const feature = financeFeatureGrant(targetPath);
+    if (feature && operatingGrantEffect(enforcement.assignments, enforcement.grants, companyId, feature) === "deny") {
+      return Response.json({ error: "That Finance feature is not granted for this role." }, { status: 403 });
+    }
+  }
   if (workspace === "procurement" && !procurementRuntimeAllowed(targetPath)) {
     const blocked = procurementBlockedResult(request.method, targetPath);
     return Response.json(blocked.body, { status: blocked.status });
@@ -89,7 +99,7 @@ export async function serveFinanceRuntime(request: Request, companyId: string, p
     return serveChartAccounts(request, actorContext.db, actorContext.actor, companyId, targetPath);
   }
   const journalAction = atriumJournalRoute(request.method, targetPath);
-  if (journalAction) {
+  if (journalAction && !amgJournalReadsProcessMemory(companyId, journalAction)) {
     return serveAtriumDraftJournals(request, actorContext.db, actorContext.actor, actorContext.email, companyId, targetPath, journalAction);
   }
   const cycleAction = atriumCycleRoute(request.method, targetPath);
@@ -98,7 +108,7 @@ export async function serveFinanceRuntime(request: Request, companyId: string, p
   }
 
   if (targetPath.startsWith("/api/") && !usesAmgProcessMemory(companyId)) {
-    const isolated = isolatedCompanyResult(request.method, `${targetPath}${search}`);
+    const isolated = isolatedCompanyResult(request.method, `${targetPath}${search}`, companyId);
     return Response.json(isolated.body, { status: isolated.status });
   }
 
@@ -130,8 +140,12 @@ export async function serveFinanceRuntime(request: Request, companyId: string, p
   }
   let text = await upstream.text();
   if (/text\/html/.test(upstreamType) || targetPath === "/" || targetPath === "") {
-    const bootstrap = workspace === "procurement" ? `${amgSessionBootstrap()}${procurementModuleLock()}` : amgSessionBootstrap();
-    text = text.replace("<div id=\"root\"></div>", `${bootstrap}<div id="root"></div>`);
+    const books = companyId === "bzg" ? bzgStandardBooks() : "";
+    const hide = financeGrantHideScript(deniedFinanceHideLabels(enforcement, companyId));
+    const bootstrap = `${amgSessionBootstrap()}${books}${workspace === "procurement" ? procurementModuleLock() : ""}${hide}`;
+    text = text.includes("<head>")
+      ? text.replace("<head>", `<head>${bootstrap}`)
+      : text.replace("<div id=\"root\"></div>", `${bootstrap}<div id="root"></div>`);
     text = injectWolfFinanceTheme(text);
   }
   text = rewriteAmgRuntimeText(text, prefix, companyId);

@@ -50,7 +50,7 @@ test("AMG finance includes procurement, and a finance membership does not become
   await withDb(async (db) => {
     const operator = await operatorActor(db);
     assert.equal((await createCompany(db, operator, { companyId: "amg", name: "AMG", currencyCode: "IDR", minorScale: 0, workspaceKind: "amg" }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
     assert.equal(moduleEnabled(await readFinanceModules(db, "amg"), "procurement"), true);
     assert.equal(moduleEnabled(await readFinanceModules(db, "bzg"), "procurement"), false);
 

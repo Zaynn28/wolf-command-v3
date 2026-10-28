@@ -4,13 +4,17 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { normalizeEmail } from "../auth/crypto";
 import { provisionAccount } from "../auth/provision";
 import { resolveDevelopmentDatabaseTarget } from "./database-target";
+import { postgresHostOverride, resolveRuntimeDatabaseTarget } from "./runtime-database";
 import { loadWolfEnvFile } from "./load-env";
 import * as schema from "./schema";
 import { platformOperators, users } from "./schema";
 import type { AuthDatabase } from "./types";
 
 export function bootstrapAllowed(env: Record<string, string | undefined>): { ok: true } | { ok: false; message: string } {
-  if (env.NODE_ENV === "production") return { ok: false, message: "Bootstrap is refused in production." };
+  if (env.NODE_ENV === "production") {
+    if (env.WOLF_ALLOW_PRODUCTION_BOOTSTRAP === "1") return { ok: true };
+    return { ok: false, message: "Bootstrap is refused in production." };
+  }
   if (env.WOLF_ALLOW_DEV_BOOTSTRAP !== "1") {
     return { ok: false, message: "Set WOLF_ALLOW_DEV_BOOTSTRAP=1 to record a local operator." };
   }
@@ -26,8 +30,14 @@ async function main(): Promise<void> {
     return;
   }
   const target = resolveDevelopmentDatabaseTarget(process.env);
-  if (!target.ok) {
+  if (!target.ok && process.env.NODE_ENV !== "production") {
     console.error(target.message);
+    process.exitCode = 1;
+    return;
+  }
+  const selected = target.ok ? target : resolveRuntimeDatabaseTarget(process.env);
+  if (!selected.ok) {
+    console.error(selected.message);
     process.exitCode = 1;
     return;
   }
@@ -38,7 +48,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const sql = postgres(target.databaseUrl, { max: 1, prepare: false });
+  const sql = postgres(selected.databaseUrl, { max: 1, prepare: false, ...postgresHostOverride(selected.databaseUrl) });
   const db = drizzle({ client: sql, schema }) as unknown as AuthDatabase;
   try {
     const existing = await db.select({ total: count() }).from(platformOperators);
@@ -68,7 +78,7 @@ async function main(): Promise<void> {
       return;
     }
     await db.insert(platformOperators).values({ userId, createdAt: new Date() });
-    console.log(`Local operator recorded for ${email}. The password was not printed.`);
+    console.log(`Operator recorded for ${email}. The password was not printed.`);
   } finally {
     await sql.end({ timeout: 5 });
   }

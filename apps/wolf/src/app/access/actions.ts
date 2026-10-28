@@ -17,9 +17,21 @@ import {
   saveAccessAssignment,
   saveAccessException,
 } from "@/server/access/policy-service";
+import { saveOperatingRoleGrants } from "@/server/access/operating-grants";
 import { originsMatch } from "@/server/auth/http";
 
 type PolicyResult = { status: string; reason?: string };
+
+export async function saveOperatingGrantsAction(formData: FormData): Promise<void> {
+  const companyId = text(formData, "companyId");
+  const result = await run(companyId, (db, actor, now) => saveOperatingRoleGrants(db, actor, {
+    companyId,
+    roleCode: text(formData, "roleCode"),
+    offered: formData.getAll("offered").map(String),
+    enabled: formData.getAll("enabled").map(String),
+  }, now));
+  finish(companyId, result, "grants-saved");
+}
 
 export async function createAccessRoleAction(formData: FormData): Promise<void> {
   const companyId = text(formData, "companyId");

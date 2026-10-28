@@ -1,7 +1,7 @@
 import "server-only";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { prepareRuntimeConnection } from "./runtime-database";
+import { postgresHostOverride, prepareRuntimeConnection } from "./runtime-database";
 import * as schema from "./schema";
 import type { AuthDatabase } from "./types";
 
@@ -19,11 +19,12 @@ export function getDb(databaseUrl: string): AuthDatabase {
   if (prepared.action === "refuse") throw new Error(prepared.message);
 
   const client = postgres(prepared.databaseUrl, {
-    max: 10,
+    max: 5,
     prepare: false,
-    connect_timeout: 5,
+    connect_timeout: 10,
     debug: false,
     onnotice() {},
+    ...postgresHostOverride(prepared.databaseUrl),
   });
   const db = drizzle({ client, schema }) as unknown as AuthDatabase;
   globalForDb.wolfAuthDb = db;

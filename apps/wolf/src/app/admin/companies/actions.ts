@@ -13,15 +13,15 @@ export async function createCompanyAction(formData: FormData): Promise<void> {
   if (!originsMatch(headerList.get("origin"), headerList.get("host"))) redirect("/admin/companies?notice=rejected");
   const context = await loadActorContext();
   if (context.status !== "ready") redirect("/login");
-  const scale = Number(String(formData.get("minorScale") ?? ""));
   const result = await createCompany(
     context.db,
     context.actor,
     {
       companyId: String(formData.get("companyId") ?? ""),
       name: String(formData.get("name") ?? ""),
-      currencyCode: String(formData.get("currencyCode") ?? ""),
-      minorScale: scale,
+      currencyCode: "IDR",
+      minorScale: 0,
+      roundingMode: String(formData.get("roundingMode") ?? "half-up"),
       memberEmail: String(formData.get("memberEmail") ?? ""),
       memberRole: String(formData.get("memberRole") ?? ""),
       companyWide: formData.get("companyWide") === "on",

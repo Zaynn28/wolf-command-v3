@@ -20,6 +20,7 @@ import {
 } from "../db/schema";
 import type { AuthDatabase } from "../db/types";
 import { departmentServesModule } from "./matrix";
+import { ensureCompanyOperatingSystem, readCompanyOperatingSystem } from "./operating-system";
 import { toActor, type GrantRecord, type MembershipRecord } from "./actor";
 import {
   assignableCapabilities,
@@ -1050,6 +1051,10 @@ export async function readAccessDesk(db: AuthDatabase, actor: Actor, requestedCo
     ...historyEmails.keys(),
   ]);
   for (const [id, email] of historyEmails) emails.set(id, email);
+  for (const managedCompany of managed) {
+    await ensureCompanyOperatingSystem(db, managedCompany.id);
+  }
+  const operating = await readCompanyOperatingSystem(db, company.id);
   return {
     status: "ok" as const,
     companies: managed,
@@ -1097,6 +1102,7 @@ export async function readAccessDesk(db: AuthDatabase, actor: Actor, requestedCo
           })),
         }
       : { versions: [], changes: [] },
+    operating,
   };
 }
 
@@ -1116,6 +1122,7 @@ function emptyDesk(
     published: null,
     assignments: [] as Array<{ id: string; email: string; kind: string; effect: string; departmentId: string | null; roleName: string | null; capabilityId: string | null; justification: string | null; expiresAt: string | null }>,
     history: { versions: [] as Array<{ id: string; versionNumber: number; status: string; reason: string; publishedAt: string | null; author: string }>, changes: [] as Array<{ versionId: string; email: string; capabilityId: string; changeKind: string }> },
+    operating: null,
   };
 }
 

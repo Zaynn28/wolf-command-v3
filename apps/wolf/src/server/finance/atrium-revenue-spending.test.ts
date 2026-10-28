@@ -107,8 +107,8 @@ test("revenue and spending documents stay with their draft journals inside the c
     await db.insert(platformOperators).values({ userId: operatorUser.id, createdAt: now });
     const operator = actor(operatorUser.id, "amg", "administrator");
     assert.equal((await createCompany(db, operator, { companyId: "amg", name: "AMG", currencyCode: "IDR", minorScale: 0, workspaceKind: "amg" }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
     await enableHotel(db, "bzg");
     await enableHotel(db, "ggv");
     const bzgUser = await user(db, "bzg@wolf-command.test");
@@ -348,7 +348,7 @@ test("a failed revenue or spending write leaves no document, journal, lines, or 
     const operatorUser = await user(db, "operator@wolf-command.test");
     await db.insert(platformOperators).values({ userId: operatorUser.id, createdAt: now });
     const operator = actor(operatorUser.id, "amg", "administrator");
-    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
     await enableHotel(db, "bzg");
     const bzg = actor((await user(db, "bzg@wolf-command.test")).id, "bzg");
     for (const account of [cash, guest, revenue]) {

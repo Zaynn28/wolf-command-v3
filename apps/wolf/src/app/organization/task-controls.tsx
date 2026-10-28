@@ -21,6 +21,8 @@ export function TaskControls({ taskId, actions }: { taskId: string; actions: Tas
   const [evidenceUrl, setEvidenceUrl] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState<TaskAction | null>(null);
+  const needsNote = actions.some((action) => action === "block" || action === "return");
+  const needsEvidence = actions.some((action) => action === "submit" || action === "complete" || action === "approve");
 
   async function run(action: TaskAction) {
     setPending(action);
@@ -42,15 +44,19 @@ export function TaskControls({ taskId, actions }: { taskId: string; actions: Tas
 
   if (actions.length === 0) return null;
   return (
-    <div className="mt-4 flex flex-col gap-3">
-      <label className="text-sm text-muted">
-        Note
-        <textarea value={note} onChange={(event) => setNote(event.target.value)} className="mt-1 w-full rounded-md border border-line bg-background px-3 py-2 text-sm text-foreground" rows={2} />
-      </label>
-      <label className="text-sm text-muted">
-        Evidence link
-        <input value={evidenceUrl} onChange={(event) => setEvidenceUrl(event.target.value)} placeholder="https://" className="mt-1 w-full rounded-md border border-line bg-background px-3 py-2 text-sm text-foreground" />
-      </label>
+    <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
+      {needsNote ? (
+        <label className="text-sm text-muted">
+          Note
+          <input value={note} onChange={(event) => setNote(event.target.value)} className="mt-1 w-full rounded-md border border-line bg-background px-3 py-2 text-sm text-foreground" />
+        </label>
+      ) : null}
+      {needsEvidence ? (
+        <label className="text-sm text-muted">
+          Evidence link
+          <input value={evidenceUrl} onChange={(event) => setEvidenceUrl(event.target.value)} placeholder="https://" className="mt-1 w-full rounded-md border border-line bg-background px-3 py-2 text-sm text-foreground" />
+        </label>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         {actions.map((action) => (
           <button key={action} type="button" disabled={pending !== null} onClick={() => void run(action)} className="rounded-md border border-line bg-raised px-3 py-2 text-sm font-medium text-foreground disabled:opacity-50">

@@ -2,8 +2,10 @@ import { and, eq } from "drizzle-orm";
 import type { Actor, Role } from "@wolf/shared";
 import { writeAudit } from "../auth/audit";
 import { defaultFinanceModules } from "../finance/modules";
+import { bookCurrency, idrDisplayScale, isRoundingMode } from "../finance/money";
 import { companies, departments, financeModules, financeSettings, memberships, platformOperators, users } from "../db/schema";
 import { ensureTenant } from "../db/tenant";
+import { ensureCompanyOperatingSystem } from "../access/operating-system";
 import type { AuthDatabase } from "../db/types";
 import { normalizeEmail } from "../auth/crypto";
 
@@ -27,6 +29,7 @@ export async function createCompany(
     memberRole?: string | null;
     companyWide?: boolean;
     workspaceKind?: string | null;
+    roundingMode?: string | null;
   },
   now: Date,
 ): Promise<{ status: "created"; companyId: string } | { status: "denied" } | { status: "invalid"; reason: string }> {
@@ -34,6 +37,7 @@ export async function createCompany(
   const companyId = input.companyId.trim();
   const name = input.name.trim();
   const currencyCode = input.currencyCode.trim().toUpperCase();
+  const roundingMode = (input.roundingMode?.trim() || "half-up").toLowerCase();
   if (!companyIdPattern.test(companyId) || companyId === "amg-runtime") {
     return { status: "invalid", reason: "Company id must be lowercase letters, numbers, and hyphens." };
   }
@@ -45,10 +49,9 @@ export async function createCompany(
     return { status: "invalid", reason: "The AMG operating system can only be enabled for company id amg." };
   }
   if (name.length < 1 || name.length > 120) return { status: "invalid", reason: "Company name is required." };
-  if (!/^[A-Z]{3}$/.test(currencyCode)) return { status: "invalid", reason: "Currency code must be three letters." };
-  if (!Number.isInteger(input.minorScale) || input.minorScale < 0 || input.minorScale > 4) {
-    return { status: "invalid", reason: "Minor-unit scale must be a whole number from 0 to 4." };
-  }
+  if (currencyCode !== bookCurrency) return { status: "invalid", reason: "Wolf books use IDR." };
+  if (input.minorScale !== idrDisplayScale) return { status: "invalid", reason: "IDR amounts display as whole rupiah." };
+  if (!isRoundingMode(roundingMode)) return { status: "invalid", reason: "Rounding mode must be half-up, half-even, or down." };
   const memberEmail = input.memberEmail?.trim() ? normalizeEmail(input.memberEmail) : null;
   const memberRole = input.memberRole?.trim() || null;
   if ((memberEmail && !memberRole) || (!memberEmail && memberRole)) {
@@ -76,6 +79,7 @@ export async function createCompany(
         currencyCode,
         minorScale: input.minorScale,
         workspaceKind,
+        roundingMode,
         createdAt: now,
       });
       await database.insert(financeModules).values(
@@ -86,6 +90,7 @@ export async function createCompany(
           updatedAt: now,
         })),
       );
+      await ensureCompanyOperatingSystem(database, companyId);
       if (memberId && memberRole) {
         await database.insert(memberships).values({
           userId: memberId,

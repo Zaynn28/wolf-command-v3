@@ -33,7 +33,7 @@ Port `5432` is the unrelated Homebrew PostgreSQL instance and is refused. Other 
 
 `NODE_ENV=production`, including `next start` and any deployed process, does not use the local allowlist. A local URL is refused, so a production-mode process does not attach to Homebrew or the Compose database.
 
-Production accepts the supplied URL only when all of these are already true:
+Production accepts a TCP URL only when all of these are already true:
 
 - scheme `postgres` or `postgresql`
 - host is present and is not a loopback or wildcard address
@@ -41,6 +41,12 @@ Production accepts the supplied URL only when all of these are already true:
 - database name is one explicit path segment
 - username and password are present in the URL
 - `sslmode` is `require`, `verify-ca`, or `verify-full`
+
+Production also accepts one Cloud SQL Auth Proxy socket URL. The hostname is the socket path, percent-encoded, with no port and no query string:
+
+`postgresql://USER:PASSWORD@%2Fcloudsql%2FPROJECT%3AREGION%3AINSTANCE/DATABASE`
+
+The project, region, and instance are the Cloud SQL connection name. The Cloud Run service mounts that socket, and the driver is given that same path as its host. The proxy is the encryption boundary, so this form does not use `sslmode`. A local URL is still refused. `db:migrate` stays on the development allowlist. `db:migrate:production` runs only when `NODE_ENV=production` and `WOLF_ALLOW_PRODUCTION_MIGRATE=1`.
 
 The repository does not contain a production host, cloud project, or credential. A deployed process must receive `DATABASE_URL` from its own environment. This document does not select or contact a provider. No production database is provisioned here.
 

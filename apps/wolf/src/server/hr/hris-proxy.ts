@@ -61,6 +61,12 @@ const companyApiPaths = [
   /^\/api\/health$/,
   /^\/api\/employees$/,
   /^\/api\/employees\/[^/]+$/,
+  /^\/api\/employees\/[^/]+\/photo$/,
+  /^\/api\/self\/profile$/,
+  /^\/api\/profile-change-requests$/,
+  /^\/api\/profile-change-requests\/[^/]+\/photo$/,
+  /^\/api\/profile-change-requests\/[^/]+\/approve$/,
+  /^\/api\/profile-change-requests\/[^/]+\/reject$/,
   /^\/api\/departments$/,
   /^\/api\/departments\/[^/]+$/,
   /^\/api\/positions$/,
@@ -71,7 +77,12 @@ const companyApiPaths = [
   /^\/api\/payroll-periods$/,
   /^\/api\/payroll-periods\/[^/]+\/approve$/,
   /^\/api\/payroll-records\/[^/]+$/,
+  /^\/api\/payroll-structure$/,
   /^\/api\/audit-logs$/,
+  /^\/api\/staff-tasks$/,
+  /^\/api\/staff-tasks\/[^/]+$/,
+  /^\/api\/imports$/,
+  /^\/api\/imports\/[^/]+$/,
 ];
 
 export function classifyHrProxyPath(path: string, mode: "development" | "production" = "development"): "api" | "blocked" | "session" | "upstream" | "refused" {
@@ -107,6 +118,8 @@ export function hrProtectedDecision(input: {
     return { status: 200, reason: "allow" };
   }
   if (input.method !== "GET" && input.method !== "HEAD") return { status: 403, reason: "method" };
+  // For a session read, assertionAccepted is false only when a still-valid assertion for another company was presented.
+  // A missing or expired assertion is not proof of sign-out; the runtime refreshes it for the signed-in company.
   if (input.operation === "session" && !input.assertionAccepted) return { status: 403, reason: "assertion" };
   return { status: 200, reason: "allow" };
 }

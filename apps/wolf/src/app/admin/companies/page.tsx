@@ -52,8 +52,12 @@ async function CompaniesScreen({
       <form action={createCompanyAction} className="flex max-w-xl flex-col gap-3 rounded-lg border border-line bg-surface px-4 py-4">
         <input name="companyId" placeholder="company-id" className="rounded-md border border-line bg-background px-3 py-2 text-sm" />
         <input name="name" placeholder="Company name" className="rounded-md border border-line bg-background px-3 py-2 text-sm" />
-        <input name="currencyCode" placeholder="Currency code" className="rounded-md border border-line bg-background px-3 py-2 text-sm" />
-        <input name="minorScale" placeholder="Scale 0-4" className="rounded-md border border-line bg-background px-3 py-2 text-sm" />
+        <p className="text-sm text-muted">Books are IDR. Document totals are whole rupiah. There is no foreign-exchange conversion.</p>
+        <select name="roundingMode" className="rounded-md border border-line bg-background px-3 py-2 text-sm" defaultValue="half-up">
+          <option value="half-up">Round half up</option>
+          <option value="half-even">Round half to even</option>
+          <option value="down">Round down</option>
+        </select>
         <input name="memberEmail" placeholder="Existing member email, optional" className="rounded-md border border-line bg-background px-3 py-2 text-sm" />
         <select name="workspaceKind" className="rounded-md border border-line bg-background px-3 py-2 text-sm" defaultValue="shared">
           <option value="shared">Shared draft ledger</option>

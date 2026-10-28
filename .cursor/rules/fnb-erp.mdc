@@ -1,0 +1,62 @@
+---
+description: F&B ERP conventions (Indonesia). Applies to all work that extends the existing app with inventory, costing, menu engineering, POS, and accounting features.
+alwaysApply: true
+---
+
+# F&B ERP: Engineering Rules
+
+Source of truth for requirements: `docs/FNB_ERP_SPEC.md`. Read the relevant section before coding.
+
+## 0. Working agreement
+- This is an EXISTING app. Extend it. Do NOT rewrite, rename, or restructure existing modules unless the spec phase says so.
+- Before creating any table, model, service, or screen, search the codebase for an existing equivalent and reuse or extend it. Record decisions in `docs/ERP_GAP_ANALYSIS.md`.
+- Follow the existing stack, folder structure, naming, lint, formatting, and test conventions. Do not introduce a new framework, ORM, state library, or UI kit without asking.
+- Work in small vertical slices. One phase or sub-phase per task. Stop and report when a slice is done.
+- If a requirement is ambiguous or conflicts with existing behavior, STOP and ask. Do not guess on accounting, tax, or stock logic.
+
+## 1. Non-negotiable domain rules
+1. **Stock is an append-only ledger.** Every stock change is a new row (item, location, qty in/out, unit cost, document ref, user, timestamp). Never update or delete ledger rows. Balances are derived. Corrections are reversal entries.
+2. **Posted documents are immutable.** Fix with reversal, credit note, or adjustment. Never edit a posted GRN, invoice, bill, journal, or period.
+3. **Posting is configuration-driven.** Debit and credit accounts come from a posting-rules table (event + category + outlet). No hardcoded account codes.
+4. **Every journal balances** (debits = credits) and is created in the same DB transaction as the document that causes it.
+5. **Effective dating** for prices, recipes, tax rates, service charge rates, and costs. Historical reports must not change when current data changes.
+6. **Versioning** for recipes. A recipe edit creates a new version. Past sales keep the old recipe cost.
+7. **Snapshots** for costing and menu engineering results. Store computed values with the inputs used.
+8. **Money**: use integer minor units or a decimal type. NEVER floats. IDR displays with 0 decimals, but keep 4+ decimals internally for per-gram or per-ml costs. Round only at display and at document totals using one shared rounding helper.
+9. **Units of measure**: store everything in a base unit (g, ml, pcs). Purchase and recipe units convert via an explicit conversion table. Never convert with hardcoded factors.
+10. **Food cost % is computed on NET price** (excluding PB1 and service charge), never on gross menu price.
+11. **Missing cost is not zero.** If an ingredient has no cost, mark the recipe "incomplete costing". Never silently treat as 0.
+12. **Idempotency.** Anything coming from POS, delivery platforms, or sync must carry a unique external ID and be safely re-processable.
+13. **Audit trail** on create, update, approve, void, price change, and period actions: user, time, old value, new value, reason.
+14. **Permissions** are role-based and per action (void, discount, approve PO, change price, close period). Manager override on POS needs a logged reason.
+15. **Multi-outlet** from day one: outlet is a dimension on every transactional table. Design for multiple legal entities even if only one exists today.
+
+## 2. Indonesia-specific rules
+- PB1/PBJT, service charge, PPN, and PPh rates and bases are CONFIGURABLE and effective-dated per outlet or region. Never hardcode 10%, 5%, or 11%/12%.
+- Tax calculation order is configurable. Default: service charge on net, PB1 on (net + service charge).
+- Support tax-inclusive and tax-exclusive pricing.
+- Bill numbers are sequential per outlet (and per terminal range for offline), gap-detectable, and never reused.
+- Halal flag on items and suppliers, with halal document expiry tracking.
+- Informal purchases (wet market, no invoice) use a "direct purchase" document with an attachment, not a hack around the PO flow.
+- Delivery platforms (GoFood, GrabFood, ShopeeFood): order-level reconciliation of commission, promo subsidy, and payout.
+- Customer personal data must follow UU PDP: minimize, restrict access, log access.
+
+## 3. Code quality
+- Business logic lives in a service/domain layer, not in controllers, UI components, or DB triggers.
+- Every migration is additive and reversible. No destructive change to existing tables without an explicit migration plan and backfill script.
+- Every new feature behind a feature flag where the app supports it.
+- Write tests with each slice: unit tests for calculations (costing, tax, weighted average, ME classification), integration tests for posting and stock ledger, and at least one end-to-end happy path.
+- Use the worked examples in `docs/FNB_ERP_SPEC.md` section 9 as test fixtures. They must pass exactly.
+- No N+1 queries on reports. Add indexes for (outlet, date), (item, location), and document references.
+- Heavy jobs (cost roll-up, ME runs, reconciliation) run as background jobs, are resumable, and are idempotent.
+- Do not log secrets or personal data. Validate all input at the boundary.
+
+## 4. Definition of done (every slice)
+- [ ] Spec requirement IDs referenced in the PR/commit message
+- [ ] Migration + rollback tested
+- [ ] Tests added and passing, including spec worked examples where relevant
+- [ ] Posting/ledger effects verified (balanced journal, correct stock movement)
+- [ ] Permissions and audit trail in place
+- [ ] No breaking change to existing features (existing tests still pass)
+- [ ] `docs/ERP_GAP_ANALYSIS.md` and any API docs updated
+- [ ] Short summary of what changed and what is deferred

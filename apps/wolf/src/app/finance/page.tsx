@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { loadActorContext } from "@/server/access/session-actor";
 import { isPlatformOperator } from "@/server/admin/companies";
-import { financeSurfaceLabel, financeWorkspace, listFinanceCompanies } from "@/server/finance/companies";
+import { grantedFinanceAccess } from "@/server/access/operating-grants";
 
 export default function FinancePage() {
   return (
@@ -42,7 +42,8 @@ async function FinanceHome() {
     );
   }
 
-  const cards = await listFinanceCompanies(context.db, context.actor);
+  const finance = await grantedFinanceAccess(context.db, context.actor);
+  const cards = finance.cards;
   const operator = await isPlatformOperator(context.db, context.actor.userId);
   return (
     <div className="flex flex-col gap-8">
@@ -67,7 +68,7 @@ async function FinanceHome() {
                 >
                   <p className="text-base font-semibold text-foreground">{card.name}</p>
                   <p className="mt-2 text-sm text-muted">
-                    {financeWorkspace(context.actor, card.companyId) === "procurement" ? "Procurement" : card.companyId}
+                    {finance.workspace(card.companyId) === "procurement" ? "Procurement" : card.companyId}
                   </p>
                   <p className="mt-2 text-sm text-muted">
                     {meta.detail}

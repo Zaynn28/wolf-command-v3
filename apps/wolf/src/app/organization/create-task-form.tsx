@@ -1,57 +1,60 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { StaffAssignList, type AssignableStaff } from "./staff-assign-list";
 
-type PersonOption = { id: string; label: string; companyId: string; departmentId: string };
-
-export function CreateTaskForm({ people }: { people: PersonOption[] }) {
+export function CreateTaskForm({ people }: { people: AssignableStaff[] }) {
   const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
   const [error, setError] = useState("");
-  const [pending, setPending] = useState(false);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [assignedId, setAssignedId] = useState<string | null>(null);
 
-  async function submit(formData: FormData) {
-    setPending(true);
+  async function assign(person: AssignableStaff) {
+    const form = formRef.current;
+    if (!form) return;
+    const formData = new FormData(form);
+    const title = String(formData.get("title") ?? "").trim();
+    const description = String(formData.get("description") ?? "").trim();
+    const dueOn = String(formData.get("dueOn") ?? "").trim();
+    const criteria = String(formData.get("completionCriteria") ?? "").trim();
+    if (!title || !description || !dueOn || !criteria) {
+      setError("Fill in the task, then choose a person.");
+      return;
+    }
+    setPendingId(person.id);
     setError("");
-    const assignee = String(formData.get("assignee") ?? "");
-    const person = people.find((item) => item.id === assignee);
     const response = await fetch("/api/organization/tasks", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        companyId: person?.companyId ?? "",
-        departmentId: person?.departmentId ?? null,
-        assigneePersonId: person?.id ?? null,
+        companyId: person.companyId,
+        departmentId: null,
+        assigneePersonId: person.id,
         teamDepartmentId: null,
-        title: formData.get("title"),
-        description: formData.get("description"),
+        title,
+        description,
         priority: formData.get("priority"),
-        dueOn: formData.get("dueOn"),
-        completionCriteria: formData.get("completionCriteria"),
+        dueOn,
+        completionCriteria: criteria,
         reviewRequired: formData.get("reviewRequired") === "on",
       }),
     });
-    setPending(false);
+    setPendingId(null);
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       setError(body?.error ?? "The task was not created.");
       return;
     }
+    setAssignedId(person.id);
+    form.reset();
     router.refresh();
   }
 
   if (people.length === 0) return null;
   return (
-    <form action={submit} className="grid gap-3 rounded-lg border border-line bg-surface p-4 md:grid-cols-2">
-      <h2 className="md:col-span-2 text-sm font-semibold">Assign a demo task</h2>
-      <label className="text-sm text-muted">
-        Person
-        <select name="assignee" className="mt-1 block w-full rounded-md border border-line bg-background px-3 py-2 text-sm text-foreground" required>
-          {people.map((person) => (
-            <option key={`${person.companyId}-${person.id}`} value={person.id}>{person.label}</option>
-          ))}
-        </select>
-      </label>
+    <form ref={formRef} onSubmit={(event) => event.preventDefault()} className="grid gap-3 md:grid-cols-2">
       <label className="text-sm text-muted">
         Priority
         <select name="priority" className="mt-1 block w-full rounded-md border border-line bg-background px-3 py-2 text-sm text-foreground" defaultValue="normal">
@@ -80,9 +83,9 @@ export function CreateTaskForm({ people }: { people: PersonOption[] }) {
         <input type="checkbox" name="reviewRequired" />
         Reviewer approval is required
       </label>
-      <button type="submit" disabled={pending} className="w-fit rounded-md border border-line bg-raised px-3 py-2 text-sm font-medium disabled:opacity-50">
-        {pending ? "Assigning…" : "Assign task"}
-      </button>
+      <div className="md:col-span-2">
+        <StaffAssignList people={people} selectedId={assignedId} pending={pendingId !== null} onAssign={(person) => void assign(person)} />
+      </div>
       {error ? <p className="text-sm text-muted md:col-span-2">{error}</p> : null}
     </form>
   );

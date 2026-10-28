@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { Actor } from "@wolf/shared";
 import { writeAudit } from "../auth/audit";
+import { visibleOperatorCompanyId } from "../companies/operator-list";
 import { financeModules, financeSettings, platformOperators } from "../db/schema";
 import type { AuthDatabase } from "../db/types";
 
@@ -113,8 +114,9 @@ export async function setFinanceModule(
 }
 
 export async function listConfiguredCompanies(db: AuthDatabase): Promise<{ companyId: string; workspaceKind: string }[]> {
-  return db
+  const rows = await db
     .select({ companyId: financeSettings.companyId, workspaceKind: financeSettings.workspaceKind })
     .from(financeSettings)
     .orderBy(asc(financeSettings.companyId));
+  return rows.filter((row) => visibleOperatorCompanyId(row.companyId));
 }

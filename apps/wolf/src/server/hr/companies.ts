@@ -1,5 +1,6 @@
 import type { Actor } from "@wolf/shared";
 import { departmentServesModule, evaluateModuleAccess } from "../access/matrix";
+import { visibleOperatorCompanyId } from "../companies/operator-list";
 
 const orgByCompany = {
   amg: "AMG",
@@ -22,6 +23,7 @@ function hrisCompanyId(companyId: string): keyof typeof orgByCompany | null {
 export function hrCompanyIds(actor: Actor): string[] {
   const ids = new Set<string>();
   for (const membership of actor.memberships) {
+    if (!visibleOperatorCompanyId(membership.companyId)) continue;
     if (hrAccess(actor, membership.companyId)) ids.add(membership.companyId);
   }
   return [...ids].sort();

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { amgProxyDecision, amgRuntimeOrigin, amgUpstreamHeaders, financeApiModule, isolatedCompanyResult, normalizeAmgProxyPath, procurementBlockedResult, procurementModuleLock, procurementRuntimeAllowed, redactAmgStatus, rewriteAmgRuntimeText, scrubAmgPayload, usesAmgProcessMemory } from "./amg-proxy";
+import { amgJournalReadsProcessMemory, amgProxyDecision, amgRuntimeOrigin, amgSessionBootstrap, amgUpstreamHeaders, bzgStandardBooks, financeApiModule, isolatedCompanyResult, normalizeAmgProxyPath, procurementBlockedResult, procurementModuleLock, procurementRuntimeAllowed, redactAmgStatus, rewriteAmgRuntimeText, scrubAmgPayload, usesAmgProcessMemory } from "./amg-proxy";
 
 test("a procurement account can open the procurement screen and no other finance feature", () => {
   assert.equal(procurementRuntimeAllowed("/"), true);
@@ -90,6 +90,16 @@ test("AMG payloads drop credential fields without dropping account codes", () =>
   assert.deepEqual(scrubbed, { account_code: "1000", nested: {} });
 });
 
+test("AMG journal reads follow posted process memory and other companies do not", () => {
+  assert.equal(amgJournalReadsProcessMemory("amg", "list"), true);
+  assert.equal(amgJournalReadsProcessMemory("amg", "read"), true);
+  assert.equal(amgJournalReadsProcessMemory("amg", "create"), false);
+  assert.equal(amgJournalReadsProcessMemory("amg", "remove"), false);
+  assert.equal(amgJournalReadsProcessMemory("amg", "unavailable"), false);
+  assert.equal(amgJournalReadsProcessMemory("bzg", "list"), false);
+  assert.equal(amgJournalReadsProcessMemory("ggv", "read"), false);
+});
+
 test("BZG and GGV do not receive AMG process-memory records", () => {
   assert.equal(usesAmgProcessMemory("amg"), true);
   assert.equal(usesAmgProcessMemory("bzg"), false);
@@ -102,6 +112,26 @@ test("BZG and GGV do not receive AMG process-memory records", () => {
   const status = isolatedCompanyResult("GET", "/api/status").body as { spreadsheetId: string | null; connected: boolean };
   assert.equal(status.spreadsheetId, null);
   assert.equal(status.connected, false);
+  const usali = isolatedCompanyResult("GET", "/api/reports/usali?period=2026-10").body as {
+    operating_revenue: unknown[];
+    total_operating_revenue: number;
+    schedules_summary: { rooms_revenue: number };
+  };
+  assert.equal(usali.total_operating_revenue, 0);
+  assert.equal(usali.schedules_summary.rooms_revenue, 0);
+  assert.ok(usali.operating_revenue.length > 0);
+  const statements = isolatedCompanyResult("GET", "/api/reports/financial-statements").body as {
+    balance_sheet: { total_assets: number; assets: unknown[] };
+    income_statement: { net_operating_income: number };
+  };
+  assert.equal(statements.balance_sheet.total_assets, 0);
+  assert.ok(statements.balance_sheet.assets.length > 0);
+  assert.equal(statements.income_statement.net_operating_income, 0);
+  const ledger = isolatedCompanyResult("GET", "/api/ledger").body as { entries: unknown[] };
+  assert.deepEqual(ledger.entries, []);
+  const trial = isolatedCompanyResult("GET", "/api/trial-balance").body as { items: unknown[]; total_debits: number };
+  assert.deepEqual(trial.items, []);
+  assert.equal(trial.total_debits, 0);
   assert.equal(financeApiModule("/api/inventory/items"), "inventory");
   assert.equal(financeApiModule("/api/tax/period-close"), "tax");
   assert.equal(financeApiModule("/api/accounts"), null);
@@ -119,4 +149,63 @@ test("AMG status redaction removes sheet identity", () => {
   assert.equal(status.clientEmail, null);
   assert.equal(status.spreadsheetId, null);
   assert.deepEqual(status.storeStats, { accounts: 0 });
+});
+
+test("BZG finance uses standard statements instead of USALI", () => {
+  const books = bzgStandardBooks();
+  assert.match(books, /Balance Sheet/);
+  assert.match(books, /Owner Pool/);
+  assert.match(books, /Night Audit/);
+  assert.match(books, /nav-pillar-integrations/);
+  assert.equal(books.includes("/api/"), false);
+  const rewritten = rewriteAmgRuntimeText(`<head>${books}</head>`, "/finance/bzg/runtime", "bzg");
+  assert.match(rewritten, /nav-operations-service-charge/);
+  const statements = isolatedCompanyResult("GET", "/api/reports/financial-statements", "bzg").body as {
+    balance_sheet: { assets: Array<{ label: string }> };
+    income_statement: { operating_revenue: Array<{ label: string }> };
+  };
+  const labels = [
+    ...statements.balance_sheet.assets,
+    ...statements.income_statement.operating_revenue,
+  ].map((line) => line.label);
+  assert.equal(labels.some((label) => label.includes("Rooms") || label.includes("Guest Ledger")), false);
+  assert.ok(labels.includes("Food & Beverage Revenue"));
+});
+
+test("the finance screen keeps the Wolf session and does not ask for its own sign-in", () => {
+  const bootstrap = amgSessionBootstrap();
+  assert.match(bootstrap, /amg_auth_session/);
+  assert.match(bootstrap, /Sign in with Google/);
+  assert.match(bootstrap, /Keluar/);
+  assert.equal(bootstrap.includes("/api/"), false);
+  const rewritten = rewriteAmgRuntimeText(`<head>${bootstrap}</head>`, "/finance/bzg/runtime", "bzg");
+  assert.match(rewritten, /localStorage.setItem\("amg_auth_session","active"\)/);
+});
+
+test("companies other than AMG get an empty petty cash book", () => {
+  for (const companyId of ["bzg", "ggv", "local-books", "dev-company"]) {
+    assert.equal(usesAmgProcessMemory(companyId), false);
+    assert.deepEqual(isolatedCompanyResult("GET", "/api/petty-cash/transactions", companyId), { status: 200, body: [] });
+    const balance = isolatedCompanyResult("GET", "/api/petty-cash/balance", companyId).body as {
+      float_limit: number;
+      current_balance: number;
+      pending_expenses_total: number;
+      pending_vouchers_count: number;
+      total_reimbursed_ytd: number;
+      config: { account_name: string; gl_account_code: string; float_limit: number };
+    };
+    assert.equal(balance.float_limit, 0);
+    assert.equal(balance.current_balance, 0);
+    assert.equal(balance.pending_expenses_total, 0);
+    assert.equal(balance.pending_vouchers_count, 0);
+    assert.equal(balance.total_reimbursed_ytd, 0);
+    assert.equal(balance.config.account_name, "");
+    assert.equal(balance.config.gl_account_code, "");
+    assert.equal(balance.config.float_limit, 0);
+    assert.equal(JSON.stringify(balance).includes("PCV-"), false);
+    assert.equal(JSON.stringify(balance).includes("10000000"), false);
+    assert.equal(isolatedCompanyResult("POST", "/api/petty-cash/transactions", companyId).status, 403);
+    assert.equal(isolatedCompanyResult("POST", "/api/petty-cash/config", companyId).status, 403);
+    assert.equal(isolatedCompanyResult("DELETE", "/api/petty-cash/transactions/PCV-2026-001", companyId).status, 403);
+  }
 });

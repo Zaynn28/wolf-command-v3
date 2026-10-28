@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte } from "drizzle-orm";
 import type { Actor } from "@wolf/shared";
 import { loadTrustedActor } from "../access/actor";
 import { evaluateModuleAccess } from "../access/matrix";
+import { filterCompaniesByOperatingGrant } from "../access/operating-grants";
 import { fingerprintEmail } from "../auth/crypto";
 import { writeAudit } from "../auth/audit";
 import { readSession } from "../auth/session";
@@ -86,7 +87,9 @@ export async function readAssistantHome(
   requestedCompanyId: string | null,
   conversationId: string | null,
 ): Promise<AssistantHome | { status: 403; error: string }> {
-  const companiesAllowed = await listReadableCompanies(db, actor);
+  const readable = await listReadableCompanies(db, actor);
+  const assistantIds = await filterCompaniesByOperatingGrant(db, actor, readable.map((company) => company.id), "assistant.open");
+  const companiesAllowed = readable.filter((company) => assistantIds.includes(company.id));
   if (companiesAllowed.length === 0) {
     return { status: 403, error: "The assistant is not available for this account." };
   }

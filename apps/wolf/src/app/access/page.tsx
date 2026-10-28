@@ -17,6 +17,7 @@ import {
   rollbackAccessPolicyAction,
   saveAccessAssignmentAction,
   saveAccessExceptionAction,
+  saveOperatingGrantsAction,
 } from "./actions";
 
 const field = "rounded-md border border-line bg-background px-3 py-2 text-sm";
@@ -67,7 +68,7 @@ async function AccessScreen({
       <PageHeader
         eyebrow="Administration"
         title="Access"
-        description="Positions name a job. Roles name enforced capabilities. A position does not grant access until a policy is published for that company."
+        description="Positions name a job. Operating roles can grant or withhold interfaces, features, and approvals. A saved grant applies only after a person is assigned that role. People with no assignment keep their current membership."
       />
       <Notice notice={first(params.notice)} reason={first(params.reason)} />
       <div className="flex flex-wrap gap-2">
@@ -93,6 +94,40 @@ async function AccessScreen({
       ) : (
         <EmptyState title="No administered company" body="This account has no administrator or owner membership." />
       )}
+      {desk.operating ? (
+        <section id="operating-system" className="flex flex-col gap-4" data-operating-profile={desk.operating.profile} data-operating-company={companyId}>
+          <div className="flex flex-col gap-2">
+            <h2 className="text-sm font-semibold">Operating system</h2>
+            <p className="text-sm text-muted">
+              {desk.operating.profile === "hotel"
+                ? "Hotel starter for AMG. Rooms, USALI, owner pool, integrations, service charge, night audit, PMS, and guest ledger can be granted here. They are not Owner Private."
+                : "Neutral starter. People, finance, procurement, and operations. USALI, owner pool, and Rooms are not offered."}
+            </p>
+            <p className="text-sm text-muted">
+              Each switch is saved for this company and role. It does not replace staff, administrator, or owner, and it does not change who can sign in. Nobody is assigned an operating role until you assign one, so current memberships stay as they are.
+            </p>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {desk.operating.units.map((unit) => (
+              <section key={unit.code} className={panel}>
+                <h3 className="text-sm font-semibold">{unit.name}</h3>
+                <p className="text-sm text-muted">{unit.summary}</p>
+                {unit.roles.length === 0 ? <p className="text-sm text-muted">No starter responsibility. This unit grants nothing.</p> : null}
+                {unit.roles.map((role) => (
+                  <div key={role.code} className="flex flex-col gap-2 border-t border-line pt-3">
+                    <p className="text-sm font-medium">{role.name}</p>
+                    <p className="text-sm text-muted">{role.summary}</p>
+                    <p className="text-sm text-muted">
+                      Existing check: {role.responsibilities.map((item) => item.capabilityLabel).join(", ") || "None"}
+                    </p>
+                    <GrantEditor companyId={companyId} roleCode={role.code} grants={role.grants} />
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <section className="grid gap-6 lg:grid-cols-2">
         <Catalog title="Enforced capabilities" items={assignableCapabilities.map((capability) => ({ id: capability.id, label: capability.label, detail: capability.description }))} />
         <Catalog title="Unavailable in this portal" items={unavailableCapabilities.map((capability) => ({ id: capability.id, label: capability.label, detail: capability.unavailableReason ?? capability.description }))} />
@@ -333,6 +368,72 @@ async function AccessScreen({
   );
 }
 
+function GrantEditor({
+  companyId,
+  roleCode,
+  grants,
+}: {
+  companyId: string;
+  roleCode: string;
+  grants: Array<{
+    code: string;
+    app: string;
+    appLabel: string;
+    section: "features" | "approvals";
+    label: string;
+    detail: string;
+    hotelOnly: boolean;
+    enabled: boolean;
+  }>;
+}) {
+  const apps: Array<{ app: string; label: string; features: typeof grants; approvals: typeof grants }> = [];
+  for (const grant of grants) {
+    let app = apps.find((item) => item.app === grant.app);
+    if (!app) {
+      app = { app: grant.app, label: grant.appLabel, features: [], approvals: [] };
+      apps.push(app);
+    }
+    if (grant.section === "approvals") app.approvals.push(grant);
+    else app.features.push(grant);
+  }
+  return (
+    <form action={saveOperatingGrantsAction} className="flex flex-col gap-3" data-operating-role={roleCode}>
+      <input type="hidden" name="companyId" value={companyId} />
+      <input type="hidden" name="roleCode" value={roleCode} />
+      {apps.map((app) => (
+        <fieldset key={app.app} className="flex flex-col gap-2">
+          <legend className="text-sm font-medium">{app.label}</legend>
+          {app.features.map((grant) => (
+            <GrantToggle key={grant.code} grant={grant} />
+          ))}
+          {app.approvals.length > 0 ? <p className="pt-1 text-sm font-medium">Approvals</p> : null}
+          {app.approvals.map((grant) => (
+            <GrantToggle key={grant.code} grant={grant} />
+          ))}
+        </fieldset>
+      ))}
+      <button type="submit" className="w-fit rounded-md border border-line px-3 py-2 text-sm">Save grants</button>
+    </form>
+  );
+}
+
+function GrantToggle({
+  grant,
+}: {
+  grant: { code: string; label: string; detail: string; hotelOnly: boolean; enabled: boolean };
+}) {
+  return (
+    <label className="flex items-start gap-2 text-sm" data-grant={grant.code}>
+      <input type="hidden" name="offered" value={grant.code} />
+      <input type="checkbox" name="enabled" value={grant.code} defaultChecked={grant.enabled} className="mt-1" />
+      <span>
+        <span>{grant.label}{grant.hotelOnly ? " · hotel" : ""}</span>
+        <span className="block text-muted">{grant.detail}</span>
+      </span>
+    </label>
+  );
+}
+
 function Simulation({ changes }: { changes: Array<{ label: string; before: string; after: string }> }) {
   return (
     <ul className="flex max-h-72 flex-col gap-1 overflow-y-auto text-sm">
@@ -362,7 +463,7 @@ function Catalog({ title, items }: { title: string; items: Array<{ id: string; l
 
 function Notice({ notice, reason }: { notice: string | null; reason: string | null }) {
   if (!notice) return null;
-  const saved = notice === "role-saved" || notice === "role-copied" || notice === "position-saved" || notice === "position-assigned" || notice === "draft-open" || notice === "assignment-saved" || notice === "exception-saved" || notice === "assignment-removed" || notice === "published" || notice === "rolled-back" || notice === "role-inactive";
+  const saved = notice === "role-saved" || notice === "role-copied" || notice === "position-saved" || notice === "position-assigned" || notice === "draft-open" || notice === "assignment-saved" || notice === "exception-saved" || notice === "assignment-removed" || notice === "published" || notice === "rolled-back" || notice === "role-inactive" || notice === "grants-saved";
   const body = notice === "denied"
     ? "That change was refused."
     : notice === "invalid"

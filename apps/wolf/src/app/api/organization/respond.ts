@@ -12,7 +12,7 @@ export async function organizationResponse(request: OrganizationRequest): Promis
   const config = readAuthConfig(process.env);
   if (!config) return Response.json({ error: "Organization is unavailable." }, { status: 503 });
   try {
-    const result = await serveOrganization(getDb(config.databaseUrl), token, new Date(), request);
+    const result = await serveOrganization(getDb(config.databaseUrl), token, new Date(), request, { mode: "api" });
     return Response.json(result.body, { status: result.status });
   } catch {
     return Response.json({ error: "Organization is unavailable." }, { status: 503 });

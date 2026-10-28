@@ -4,6 +4,7 @@ import { SessionMenu } from "@/components/session-menu";
 import { ShellFrame } from "@/components/shell-frame";
 import { TemporaryPasswordGate } from "@/components/temporary-password-gate";
 import { navigation, type NavItem } from "@/lib/navigation";
+import { applyPortalGrants, readOperatingEnforcement } from "@/server/access/operating-grants";
 import { grantedHrefs } from "@/server/access/navigation-access";
 import { loadActorContext } from "@/server/access/session-actor";
 import { isPlatformOperator } from "@/server/admin/companies";
@@ -20,6 +21,12 @@ async function GrantedShell({ children }: { children: ReactNode }) {
   const context = await loadActorContext();
   const hrefs = new Set(grantedHrefs(context.status === "ready" ? context.actor : null));
   if (context.status === "ready" && (await isPlatformOperator(context.db, context.actor.userId))) hrefs.add("/admin/companies");
+  if (context.status === "ready") {
+    const enforcement = await readOperatingEnforcement(context.db, context.actor.userId);
+    for (const href of [...hrefs]) {
+      if (!applyPortalGrants([href], context.actor, enforcement).includes(href)) hrefs.delete(href);
+    }
+  }
   const items: NavItem[] = navigation.filter((item) => hrefs.has(item.href));
   return (
     <ShellFrame

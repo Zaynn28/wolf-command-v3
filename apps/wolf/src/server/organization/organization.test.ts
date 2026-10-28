@@ -37,8 +37,12 @@ test("a Wolf session can read demo organization data and an unauthenticated requ
     const tree = await serveOrganization(db, session.sessionToken, now, { kind: "tree", companyId: null, query: "jun" });
     assert.equal(tree.status, 200);
     const body = JSON.stringify(tree.body);
-    assert.match(body, /Jun Park/);
-    assert.match(body, /"isDemo":true/);
+    assert.equal(body.includes("Jun Park"), false);
+    assert.equal(body.includes("Sari Quinn"), false);
+    assert.equal(body.includes("Aria Chen"), false);
+    assert.equal(body.includes("Mina Sol"), false);
+    assert.equal(body.includes("Kai Mendes"), false);
+    assert.equal(body.includes("Leo Hart"), false);
     assert.equal(body.includes("salary"), false);
     assert.equal(body.includes("password"), false);
     assert.equal(body.includes("linkedUserId"), false);
@@ -79,13 +83,8 @@ test("company scope, demo login, seed idempotency, and task authority are enforc
     assert.equal(forged.status, 403);
 
     const bothSession = await signIn(db, both.emailNormalized, now);
-    const multi = await serveOrganization(db, bothSession.sessionToken, now, { kind: "person", personId: "demo-kai-mendes" });
-    assert.equal(multi.status, 200);
-    if (multi.status === 200 && "person" in (multi.body as object)) {
-      const person = (multi.body as { person: { companies: unknown[]; isDemo: boolean } }).person;
-      assert.equal(person.companies.length, 2);
-      assert.equal(person.isDemo, true);
-    }
+    const synthetic = await serveOrganization(db, bothSession.sessionToken, now, { kind: "person", personId: "demo-kai-mendes" });
+    assert.equal(synthetic.status, 403);
 
     const login = await loginWithPassword({ db, now: () => now }, { email: "demo-jun-park@wolf-command.test", password: "not-a-wolf-password", ip: null });
     assert.notEqual(login.status, "verified");
@@ -226,35 +225,15 @@ test("staff progress counts come from tasks and stay inside the actor's companie
     const amg = progressBody(forged.body);
     assert.equal(amg.ownerView, false);
     assert.equal(amg.scope, "company");
-    assert.deepEqual(amg.people.map((item) => item.id), [
-      "demo-aria-chen",
-      "demo-jun-park",
-      "demo-kai-mendes",
-      "demo-leo-hart",
-      "demo-mina-sol",
-      "demo-sari-quinn",
-    ]);
-    assert.equal(amg.people.some((item) => item.id === "demo-noah-ivers"), false);
-    for (const item of amg.people) {
-      assert.equal(item.isDemo, true);
-      assert.equal(item.companies.every((company) => company.companyId === "amg"), true);
-    }
-    const jun = progressPerson(amg, "demo-jun-park");
-    assert.equal(assertProgressCounts(jun.counts, { ASSIGNED: 1, ACCEPTED: 1, overdue: 1 }), jun.tasks.length);
-    assert.equal(jun.tasks.some((task) => task.id === "demo-task-linen" && task.status === "ASSIGNED" && task.dueOn === "2026-10-20" && task.overdue && task.companyId === "amg"), true);
-    assert.equal(jun.tasks.some((task) => task.id === "demo-task-welcome" && task.status === "ACCEPTED" && task.overdue === false), true);
-    assertProgressCounts(progressPerson(amg, "demo-mina-sol").counts, { IN_PROGRESS: 1 });
-    assertProgressCounts(progressPerson(amg, "demo-sari-quinn").counts, { IN_REVIEW: 1 });
-    assertProgressCounts(progressPerson(amg, "demo-kai-mendes").counts, { COMPLETED: 1 });
-    assert.equal(progressPerson(amg, "demo-kai-mendes").tasks[0]?.overdue, false);
-    assertProgressCounts(progressPerson(amg, "demo-aria-chen").counts, {});
-    assert.equal(progressPerson(amg, "demo-aria-chen").tasks.length, 0);
+    assert.deepEqual(amg.people.map((item) => item.id), []);
     assert.equal(amg.unassigned.title, "Unassigned team tasks");
     assert.equal(amg.unassigned.tasks.length, 1);
     assert.equal(amg.unassigned.tasks[0]?.id, "demo-task-team");
     assert.equal(amg.unassigned.tasks[0]?.status, "ASSIGNED");
-    assert.equal(amg.people.every((item) => item.tasks.every((task) => task.id !== "demo-task-team")), true);
     const serialized = JSON.stringify(forged.body);
+    for (const name of ["Jun Park", "Sari Quinn", "Aria Chen", "Mina Sol", "Kai Mendes", "Leo Hart", "Noah Ivers"]) {
+      assert.equal(serialized.includes(name), false, name);
+    }
     assert.deepEqual(forbiddenProgressKeys(forged.body), []);
     assert.equal(serialized.includes("linkedUserId"), false);
     assert.equal(serialized.includes("salary"), false);
@@ -263,20 +242,9 @@ test("staff progress counts come from tasks and stay inside the actor's companie
     assert.equal(serialized.includes("progress-admin@"), false);
     assert.equal(serialized.includes("@"), false);
 
-    await db.update(orgTasks).set({ status: "IN_PROGRESS" }).where(eq(orgTasks.id, "demo-task-linen"));
-    const changed = progressBody((await serveOrganization(db, adminSession.sessionToken, now, { kind: "progress", companyId: "amg", today: progressToday })).body);
-    assert.equal(assertProgressCounts(progressPerson(changed, "demo-jun-park").counts, { ACCEPTED: 1, IN_PROGRESS: 1, overdue: 1 }), 2);
-    assert.equal(progressPerson(changed, "demo-jun-park").tasks.some((task) => task.id === "demo-task-linen" && task.status === "IN_PROGRESS"), true);
-
     const bzg = progressBody((await serveOrganization(db, adminSession.sessionToken, now, { kind: "progress", companyId: "bzg", today: progressToday })).body);
-    assert.deepEqual(bzg.people.map((item) => item.id), ["demo-kai-mendes", "demo-noah-ivers"]);
-    assert.equal(progressPerson(bzg, "demo-kai-mendes").companies.length, 1);
-    assert.equal(progressPerson(bzg, "demo-kai-mendes").companies[0]?.companyId, "bzg");
-    assertProgressCounts(progressPerson(bzg, "demo-kai-mendes").counts, {});
-    assert.equal(progressPerson(bzg, "demo-noah-ivers").employmentStatus, "leave");
-    assertProgressCounts(progressPerson(bzg, "demo-noah-ivers").counts, { BLOCKED: 1, overdue: 1 });
+    assert.deepEqual(bzg.people.map((item) => item.id), []);
     assert.equal(bzg.unassigned.tasks.length, 0);
-    assert.equal(bzg.people.some((item) => item.id === "demo-jun-park"), false);
 
     const ggv = progressBody((await serveOrganization(db, adminSession.sessionToken, now, { kind: "progress", companyId: "ggv", today: progressToday })).body);
     assert.equal(ggv.people.length, 0);
@@ -287,10 +255,7 @@ test("staff progress counts come from tasks and stay inside the actor's companie
 
     const combined = progressBody((await serveOrganization(db, adminSession.sessionToken, now, { kind: "progress", companyId: null, today: progressToday })).body);
     assert.equal(combined.ownerView, false);
-    const kai = progressPerson(combined, "demo-kai-mendes");
-    assert.deepEqual(kai.companies.map((company) => company.companyId).sort(), ["amg", "bzg"]);
-    assertProgressCounts(kai.counts, { COMPLETED: 1 });
-    assert.equal(combined.people.some((item) => item.id === "demo-noah-ivers"), true);
+    assert.deepEqual(combined.people.map((item) => item.id), []);
 
     for (const companyId of ["dev-company", "not-a-company"]) {
       const missing = await serveOrganization(db, adminSession.sessionToken, now, {
@@ -328,9 +293,126 @@ test("staff progress counts come from tasks and stay inside the actor's companie
     const ownerProgress = progressBody((await serveOrganization(db, ownerSession.sessionToken, now, { kind: "progress", companyId: "amg", today: progressToday })).body);
     assert.equal(ownerProgress.ownerView, true);
     assert.equal(ownerProgress.scope, "owner");
-    assert.equal(ownerProgress.people.some((item) => item.id === "demo-jun-park"), true);
-    assert.equal(ownerProgress.people.some((item) => item.id === "demo-noah-ivers"), false);
+    assert.equal(ownerProgress.people.some((item) => item.id.startsWith("demo-")), false);
+    assert.equal(JSON.stringify(ownerProgress).includes("Jun Park"), false);
     const ownerCross = await serveOrganization(db, ownerSession.sessionToken, now, { kind: "progress", companyId: "bzg", today: progressToday });
     assert.equal(ownerCross.status, 403);
+  });
+});
+
+test("reassignment accepts only a person in the task company and keeps the current status", async () => {
+  await withDb(async (db) => {
+    await ensureTenant(db, "amg", null);
+    await ensureTenant(db, "bzg", null);
+    await seedOrganizationDemo(db, now);
+    const admin = await addUser(db, "reassign-admin@wolf-command.test");
+    await membership(db, admin.id, "amg", "administrator");
+    await membership(db, admin.id, "bzg", "administrator");
+    const staff = await addUser(db, "reassign-staff@wolf-command.test");
+    await membership(db, staff.id, "amg", "staff");
+    const adminSession = await signIn(db, admin.emailNormalized, now);
+    const staffSession = await signIn(db, staff.emailNormalized, new Date(now.getTime() + 1000));
+
+    const welcomeBefore = (await db.select().from(orgTasks).where(eq(orgTasks.id, "demo-task-welcome")))[0];
+    const linenBefore = (await db.select().from(orgTasks).where(eq(orgTasks.id, "demo-task-linen")))[0];
+    assert.equal(welcomeBefore?.status, "ACCEPTED");
+    assert.equal(welcomeBefore?.assigneePersonId, "demo-jun-park");
+
+    const denied = await serveOrganization(db, staffSession.sessionToken, new Date(now.getTime() + 2000), {
+      kind: "reassign",
+      taskId: "demo-task-welcome",
+      body: { assigneePersonId: "demo-mina-sol", note: "staff" },
+    });
+    assert.equal(denied.status, 403);
+
+    const crossed = await serveOrganization(db, adminSession.sessionToken, new Date(now.getTime() + 3000), {
+      kind: "reassign",
+      taskId: "demo-task-welcome",
+      body: { assigneePersonId: "demo-noah-ivers", note: "cross" },
+    });
+    assert.equal(crossed.status, 403);
+    const foreignTeam = await serveOrganization(db, adminSession.sessionToken, new Date(now.getTime() + 4000), {
+      kind: "reassign",
+      taskId: "demo-task-welcome",
+      body: { assigneePersonId: "demo-mina-sol", teamDepartmentId: "wolf-demo-fin", note: "foreign team" },
+    });
+    assert.equal(foreignTeam.status, 403);
+
+    const unchanged = (await db.select().from(orgTasks).where(eq(orgTasks.id, "demo-task-welcome")))[0];
+    assert.equal(unchanged?.status, "ACCEPTED");
+    assert.equal(unchanged?.assigneePersonId, "demo-jun-park");
+
+    const rosterBefore = (await db.select().from(orgTasks).where(eq(orgTasks.id, "demo-task-roster")))[0];
+    const moved = await serveOrganization(db, adminSession.sessionToken, new Date(now.getTime() + 5000), {
+      kind: "reassign",
+      taskId: "demo-task-roster",
+      body: { assigneePersonId: "hr-amg-amg-01", note: "Reassigned." },
+    }, {
+      mode: "provided",
+      byCompany: {
+        amg: [{ employeeCode: "AMG-01", displayName: "Apriadi", employmentStatus: "active", departmentName: "Housekeeping", positionTitle: null }],
+      },
+    });
+    assert.equal(moved.status, 200);
+    if (moved.status === 200 && "status" in (moved.body as object)) {
+      assert.equal((moved.body as { status: string }).status, "IN_PROGRESS");
+    }
+    const roster = (await db.select().from(orgTasks).where(eq(orgTasks.id, "demo-task-roster")))[0];
+    assert.equal(roster?.status, "IN_PROGRESS");
+    assert.equal(roster?.status, rosterBefore?.status);
+    assert.equal(roster?.assigneePersonId, "hr-amg-amg-01");
+
+    const welcome = (await db.select().from(orgTasks).where(eq(orgTasks.id, "demo-task-welcome")))[0];
+    assert.equal(welcome?.status, "ACCEPTED");
+    assert.equal(welcome?.assigneePersonId, "demo-jun-park");
+
+    const linen = (await db.select().from(orgTasks).where(eq(orgTasks.id, "demo-task-linen")))[0];
+    assert.equal(linen?.status, linenBefore?.status);
+    assert.equal(linen?.assigneePersonId, linenBefore?.assigneePersonId);
+
+    const again = await serveOrganization(db, adminSession.sessionToken, new Date(now.getTime() + 6000), {
+      kind: "tree",
+      companyId: "amg",
+      query: "AMG-0",
+    }, {
+      mode: "provided",
+      byCompany: {
+        amg: [{ employeeCode: "AMG-01", displayName: "Apriadi", employmentStatus: "active", departmentName: "Housekeeping", positionTitle: null }],
+      },
+    });
+    const linked = await db.select().from(orgPeople).where(eq(orgPeople.source, "hr"));
+    assert.equal(linked.length, 1);
+    assert.equal(again.status, 200);
+    const againBody = JSON.stringify(again.body);
+    assert.equal(againBody.includes("Apriadi"), true);
+    assert.equal(againBody.includes("Jun Park"), false);
+    assert.equal(linked[0]?.linkedUserId, null);
+    assert.equal(linked[0]?.isDemo, false);
+
+    const directory = {
+      mode: "provided" as const,
+      byCompany: {
+        amg: [{ employeeCode: "AMG-01", displayName: "Apriadi", employmentStatus: "active" as const, departmentName: "Housekeeping", positionTitle: null }],
+        bzg: [],
+      },
+    };
+    const amgProgress = progressBody((await serveOrganization(db, adminSession.sessionToken, now, { kind: "progress", companyId: "amg", today: progressToday }, directory)).body);
+    const apriadi = progressPerson(amgProgress, "hr-amg-amg-01");
+    assert.equal(apriadi.isDemo, false);
+    assert.equal(apriadi.companies.every((company) => company.companyId === "amg"), true);
+    assert.equal(assertProgressCounts(apriadi.counts, { IN_PROGRESS: 1 }), apriadi.tasks.length);
+    assert.equal(apriadi.tasks.some((task) => task.id === "demo-task-roster" && task.status === "IN_PROGRESS"), true);
+    assert.equal(apriadi.tasks.some((task) => task.id === "demo-task-welcome" || task.id === "demo-task-linen"), false);
+    const bzgProgress = progressBody((await serveOrganization(db, adminSession.sessionToken, now, { kind: "progress", companyId: "bzg", today: progressToday }, directory)).body);
+    assert.deepEqual(bzgProgress.people, []);
+    assert.equal(JSON.stringify(bzgProgress).includes("Apriadi"), false);
+
+    const audit = await db.select().from(auditEvents).where(eq(auditEvents.resourceId, "demo-task-roster"));
+    assert.equal(audit.some((event) => event.eventType === "authorization_allowed"), true);
+    const metadata = JSON.stringify(audit.map((event) => event.metadata));
+    assert.equal(metadata.includes("salary"), false);
+    assert.equal(metadata.includes("password"), false);
+    assert.equal(metadata.includes("nik"), false);
+    assert.equal(metadata.includes("@"), false);
   });
 });

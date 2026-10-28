@@ -48,7 +48,7 @@ export const navigation = [
   {
     href: "/access",
     label: "Access",
-    description: "Positions, roles, and access policies for companies you administer.",
+    description: "Positions, roles, access policies, and the company operating structure.",
   },
   {
     href: "/settings",

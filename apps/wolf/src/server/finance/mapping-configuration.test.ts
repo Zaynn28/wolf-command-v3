@@ -26,8 +26,8 @@ test("mapping configuration stays inside the company and rejects an invalid payl
     await db.insert(platformOperators).values({ userId: operatorUser.id, createdAt: now });
     const operator = actor(operatorUser.id, "unused");
     assert.equal((await createCompany(db, operator, { companyId: "amg", name: "AMG", currencyCode: "IDR", minorScale: 0, workspaceKind: "amg" }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
-    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "USD", minorScale: 2 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "bzg", name: "BZG", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
+    assert.equal((await createCompany(db, operator, { companyId: "ggv", name: "GGV", currencyCode: "IDR", minorScale: 0 }, now)).status, "created");
     const bzg = actor((await user(db, "bzg@wolf-command.test")).id, "bzg");
     const ggv = actor((await user(db, "ggv@wolf-command.test")).id, "ggv");
     const amg = actor((await user(db, "amg@wolf-command.test")).id, "amg");

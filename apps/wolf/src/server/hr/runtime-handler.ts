@@ -4,6 +4,7 @@ import {
   hrAssertionCookieSecure,
   hrEmbeddedSession,
   readHrAssertionCookie,
+  readSignedHrAssertion,
   resolveHrAssertionSecret,
   signHrAssertion,
   verifyHrAssertion,
@@ -34,6 +35,23 @@ function hrJson(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: hrResponseHeaders("application/json; charset=utf-8") });
 }
 
+/** Employee self-service may file its own profile request. The employee directory and payroll stay closed. */
+export function employeeSelfServiceApi(access: string, path: string, method: string): boolean {
+  if (access !== "employee") return true;
+  if (method === "GET" || method === "HEAD") {
+    return (
+      path === "/api/health" ||
+      path === "/api/self/profile" ||
+      path === "/api/departments" ||
+      path === "/api/positions" ||
+      path === "/api/profile-change-requests" ||
+      /^\/api\/employees\/[^/]+\/photo$/.test(path) ||
+      /^\/api\/profile-change-requests\/[^/]+\/photo$/.test(path)
+    );
+  }
+  return method === "POST" && path === "/api/profile-change-requests";
+}
+
 export async function executeHrRuntime(input: {
   request: Request;
   companyId: string;
@@ -54,6 +72,7 @@ export async function executeHrRuntime(input: {
   const operation = !targetPath || search === null ? "refused" : classifyHrProxyPath(targetPath, input.env.NODE_ENV === "production" ? "production" : "development");
   const secret = resolveHrAssertionSecret(input.env);
   const assertionToken = readHrAssertionCookie(input.request.headers.get("cookie"));
+  const signed = assertionToken && secret ? readSignedHrAssertion(assertionToken, secret) : null;
   const assertion =
     (operation === "session" || operation === "api") && secret && input.actorStatus === "ready" && input.userId
       ? verifyHrAssertion(assertionToken ?? "", secret, input.nowSeconds, {
@@ -61,12 +80,13 @@ export async function executeHrRuntime(input: {
           companyId: input.companyId,
         })
       : null;
+  const otherCompanyAssertion = operation === "session" && signed !== null && signed.companyId !== input.companyId;
   const decision = hrProtectedDecision({
     actorStatus: input.actorStatus,
     companyOpen: input.companyOpen,
     operation,
     method: input.request.method,
-    assertionAccepted: assertion !== null,
+    assertionAccepted: operation === "session" ? !otherCompanyAssertion : assertion !== null,
   });
   if (decision.status !== 200) {
     const outcome = decision.reason === "assertion" ? "assertion_rejected" : "denied";
@@ -88,14 +108,26 @@ export async function executeHrRuntime(input: {
   }
 
   if (operation === "session") {
-    const session = hrEmbeddedSession(opened, assertion, input.email);
+    const token = signHrAssertion(secret, {
+      sub: input.userId,
+      companyId: opened.companyId,
+      iat: input.nowSeconds,
+      jti: randomBytes(16).toString("base64url"),
+      workspace: opened.access === "employee" ? "self" : "hr",
+    });
+    const fresh = verifyHrAssertion(token, secret, input.nowSeconds, { userId: input.userId, companyId: input.companyId });
+    const session = hrEmbeddedSession(opened, fresh, input.email);
     const outcome = session.status === 200 ? "allow" : "assertion_rejected";
     console.info(JSON.stringify({ event: "hr_session", companyId: input.companyId, outcome, module: "hr" }));
-    return { response: hrJson(session.status, session.body), outcome };
+    const headers = hrResponseHeaders("application/json; charset=utf-8");
+    if (session.status === 200) {
+      headers.append("set-cookie", hrAssertionCookie(token, opened.companyId, hrAssertionCookieSecure(input.env, incoming.protocol)));
+    }
+    return { response: new Response(JSON.stringify(session.body), { status: session.status, headers }), outcome };
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
-  if (operation === "api" && opened.status === "unlinked" && opened.access === "employee") {
+  if (operation === "api" && opened.status === "unlinked" && !employeeSelfServiceApi(opened.access, targetPath, input.request.method)) {
     return { response: hrJson(403, { error: "That HR operation is blocked." }), outcome: "denied" };
   }
   if (operation === "api") {
@@ -158,6 +190,7 @@ export async function executeHrRuntime(input: {
       companyId: opened.companyId,
       iat: input.nowSeconds,
       jti: randomBytes(16).toString("base64url"),
+      workspace: opened.access === "employee" ? "self" : "hr",
     });
     headers.append("set-cookie", hrAssertionCookie(token, opened.companyId, hrAssertionCookieSecure(input.env, incoming.protocol)));
   }
